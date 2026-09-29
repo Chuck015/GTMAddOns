@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "package": "com.example.gtmaddons.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "ClientPlayNetworkHandlerMixin",
+    "HandledScreenAccessor",
+    "InGameHudMixin",
+    "LivingEntityInvoker",
+    "MinecraftClientMixin",
+    "SoundSystemMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
