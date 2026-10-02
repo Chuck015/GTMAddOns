@@ -35,7 +35,27 @@ public final class NearList {
 	/** One player: everything up to " (NNb)". */
 	private static final Pattern ENTRY = Pattern.compile("\\s*(.+?)\\s*\\((\\d+)b\\)\\s*(?:,|$)");
 
+	/** A reply counts as asked for if the player ran any command (/near, an alias...) within this long before it. */
+	private static final long ASKED_WINDOW_NANOS = 15_000_000_000L;
+	private static volatile long lastCommandNanos = System.nanoTime() - 2 * ASKED_WINDOW_NANOS;
+
 	private NearList() {}
+
+	/** Any command the player sends: a /near reply that follows is one they asked for. */
+	public static void onCommand() {
+		lastCommandNanos = System.nanoTime();
+	}
+
+	/**
+	 * A /near reply the player didn't ask for: the server sent it with no command run just before.
+	 * Those are stale or someone else's, so they are hidden instead of shown as if current.
+	 */
+	public static boolean isUnsolicitedReply(Text message) {
+		String plain = message.getString();
+		if (!plain.contains("[GTM]")) return false;
+		if (!plain.contains(HEADER.substring(0, HEADER.length() - 1)) && !plain.contains("No nearby players found")) return false;
+		return System.nanoTime() - lastCommandNanos > ASKED_WINDOW_NANOS;
+	}
 
 	/** One styled run of the original message. */
 	private record Run(String text, Style style) {}

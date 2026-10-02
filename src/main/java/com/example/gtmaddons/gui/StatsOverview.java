@@ -41,6 +41,12 @@ import java.util.Map;
 final class StatsOverview {
 	private StatsOverview() {}
 
+	private static PlayerDetail cachedDetail;
+	private static PvpCategory cachedCategory;
+	private static boolean cachedIndividual;
+	private static Data cachedData;
+	private static Ratings.Result cachedRatings;
+
 	static final int ROW_A = 94;
 	static final int ROW_B = 106;
 	static final int GAP = 5;
@@ -56,7 +62,15 @@ final class StatsOverview {
 	 */
 	static Insight draw(DrawContext context, TextRenderer font, PlayerDetail detail, PvpCategory category, boolean individualGuns,
 			int x, int y, int w, int mouseX, int mouseY) {
-		Data data = new Data(detail, category, individualGuns);
+		// Only rebuilt when the stats, category or individual-guns switch change, not every frame.
+		if (cachedData == null || cachedDetail != detail || cachedCategory != category || cachedIndividual != individualGuns) {
+			cachedData = new Data(detail, category, individualGuns);
+			cachedRatings = Ratings.compute(detail, category);
+			cachedDetail = detail;
+			cachedCategory = category;
+			cachedIndividual = individualGuns;
+		}
+		Data data = cachedData;
 		Insight hovered = null;
 
 		// Row A: two rings, the breakdown, the fights strip.
@@ -67,7 +81,7 @@ final class StatsOverview {
 		kdCard(context, font, data, cx, y, ringW, ROW_A);
 		hovered = hover(context, Insight.FIGHTS, cx, y, ringW, ROW_A, mouseX, mouseY, hovered);
 		cx += ringW + GAP;
-		ratingCard(context, font, Ratings.compute(detail, category), category, cx, y, ringW, ROW_A);
+		ratingCard(context, font, cachedRatings, category, cx, y, ringW, ROW_A);
 		hovered = hover(context, Insight.RATING, cx, y, ringW, ROW_A, mouseX, mouseY, hovered);
 		cx += ringW + GAP;
 		if (category == PvpCategory.WING) wingSwapCard(context, font, data, cx, y, breakdownW, ROW_A);

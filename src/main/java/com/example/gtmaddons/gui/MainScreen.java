@@ -1,5 +1,6 @@
 package com.example.gtmaddons.gui;
 
+import com.example.gtmaddons.update.Updater;
 import com.example.gtmaddons.GTMAddOnsClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
@@ -26,6 +27,7 @@ public class MainScreen extends Screen {
 	private final GTMAddOnsClient mod;
 	private ButtonWidget playerStats;
 	private ButtonWidget personalStats;
+	private ButtonWidget update;
 	private String status = null;
 
 	public MainScreen(GTMAddOnsClient mod) {
@@ -48,12 +50,32 @@ public class MainScreen extends Screen {
 				.dimensions(x, top + 48, BUTTON_WIDTH, 20).build());
 		addDrawableChild(ButtonWidget.builder(ScreenTexts.DONE, b -> close())
 				.dimensions(x, top + 84, BUTTON_WIDTH, 20).build());
+		update = addDrawableChild(ButtonWidget.builder(Text.literal("Update"), b -> Updater.INSTANCE.requestUpdate())
+				.dimensions(x, top + 108, BUTTON_WIDTH, 20).build());
 		updateCombatLock();
+		updateUpdateButton();
 	}
 
 	@Override
 	public void tick() {
 		updateCombatLock();
+		updateUpdateButton();
+	}
+
+	/** Shown only when there's an update: offers it, then shows its progress. */
+	private void updateUpdateButton() {
+		Updater.State state = Updater.INSTANCE.state();
+		String version = Updater.INSTANCE.latestVersion();
+		update.visible = state == Updater.State.AVAILABLE || state == Updater.State.DOWNLOADING || state == Updater.State.READY
+				|| (state == Updater.State.FAILED && version != null);
+		update.active = state == Updater.State.AVAILABLE || state == Updater.State.FAILED;
+		String label = switch (state) {
+			case DOWNLOADING -> "Downloading " + version + "...";
+			case READY -> "Update " + version + " ready - restart to install";
+			case FAILED -> "Update failed - retry";
+			default -> "Update to " + version;
+		};
+		update.setMessage(Text.literal(label));
 	}
 
 	private void updateCombatLock() {

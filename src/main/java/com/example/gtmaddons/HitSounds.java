@@ -43,7 +43,7 @@ public final class HitSounds {
 
 	public static final List<Choice> CHOICES = List.of(
 			new Choice("Ding", "minecraft:entity.experience_orb.pickup"),
-			new Choice("Hitmarker", "minecraft:entity.arrow.hit_player"),
+			new Choice("Hitmarker", "minecraft:block.note_block.hat"),
 			new Choice("Bell", "minecraft:block.note_block.bell"),
 			new Choice("Pling", "minecraft:block.note_block.pling"),
 			new Choice("Chime", "minecraft:block.note_block.chime"),
@@ -70,6 +70,11 @@ public final class HitSounds {
 
 	public void init(Settings settings) {
 		this.settings = settings;
+		// The old Hitmarker (entity.arrow.hit_player) is the same recording as Ding; keep those players on Ding.
+		if ("minecraft:entity.arrow.hit_player".equals(settings.hitSoundId)) {
+			settings.hitSoundId = "minecraft:entity.experience_orb.pickup";
+			settings.save();
+		}
 	}
 
 	/** Index into CHOICES of the saved sound (the first if it's unknown). */

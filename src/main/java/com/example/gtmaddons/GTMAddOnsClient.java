@@ -1,5 +1,6 @@
 package com.example.gtmaddons;
 
+import com.example.gtmaddons.update.Updater;
 import com.example.gtmaddons.gui.PlayersScreen;
 import com.example.gtmaddons.gui.Format;
 import com.example.gtmaddons.gui.MainScreen;
@@ -158,6 +159,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 
 	@Override
 	public void onInitializeClient() {
+		Updater.INSTANCE.start();
 		HudRenderCallback.EVENT.register(this::onHudRender);
 		ClientCommandRegistrationCallback.EVENT.register(this::registerCommands);
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> stats.flushBlocking(3000));
@@ -165,15 +167,21 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		FightTracker.INSTANCE.setBeforeFightEnds(this::finishMomentum);
 		WorldRenderEvents.START_MAIN.register(context -> {
 			MinecraftClient client = MinecraftClient.getInstance();
+			long frameStart = System.nanoTime();
 			momentumFrame(client);
 			// Before CombatTracker, so a death is seen before it clears the tag.
 			FightTracker.INSTANCE.onFrame(client);
 			CombatTracker.INSTANCE.onFrame(client);
 			ShotTracker.INSTANCE.onFrame(client);
+			showUpdateNotice(client);
 			HitSounds.INSTANCE.onFrame(client);
 			ComboTracker.INSTANCE.onFrame(client);
 			LatencyTester.INSTANCE.onFrame(client);
+			long devStart = System.nanoTime();
 			DevLogger.INSTANCE.onFrame(client);
+			long frameEnd = System.nanoTime();
+			DevLogger.INSTANCE.perf(DevLogger.PERF_DEV, frameEnd - devStart);
+			DevLogger.INSTANCE.perf(DevLogger.PERF_HOOKS, devStart - frameStart);
 		});
 		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
 			if (!overlay) {
@@ -182,6 +190,13 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			}
 			ShotTracker.INSTANCE.onMessage(message, overlay);
 			DevLogger.INSTANCE.onMessage(message, overlay);
+		});
+		// A /near reply nobody asked for is hidden (see NearList.isUnsolicitedReply).
+		ClientSendMessageEvents.COMMAND.register(command -> NearList.onCommand());
+		ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
+			if (overlay || !settings.betterNear || !NearList.isUnsolicitedReply(message)) return true;
+			DevLogger.INSTANCE.noteHiddenNear(message);
+			return false;
 		});
 		// GTM's /near reply, rewritten in place as a sorted list (see NearList).
 		ClientReceiveMessageEvents.MODIFY_GAME.register((message, overlay) ->
@@ -230,7 +245,10 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	private void registerCommands(CommandDispatcher<FabricClientCommandSource> dispatcher,
 			net.minecraft.command.CommandRegistryAccess registryAccess) {
 		for (String name : new String[] { "GTMAddOns", "gao", "gtmaddons" }) {
-			dispatcher.register(literal(name).executes(ctx -> {
+			dispatcher.register(literal(name).then(literal("update").executes(ctx -> {
+				Updater.INSTANCE.requestUpdate();
+				return 1;
+			})).executes(ctx -> {
 				openMainScreen();
 				return 1;
 			}));
@@ -238,6 +256,13 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	}
 
 	/** Opens the main menu. Called from a command, so it waits for the chat screen to close first. */
+	/** Update messages (see Updater), shown in chat once you're in a world. */
+	private void showUpdateNotice(MinecraftClient client) {
+		if (client.player == null) return;
+		String notice = Updater.INSTANCE.takeNotice();
+		if (notice != null) client.player.sendMessage(Text.literal("[GTMAddOns] " + notice).formatted(Formatting.AQUA), false);
+	}
+
 	private void openMainScreen() {
 		MinecraftClient client = MinecraftClient.getInstance();
 		client.send(() -> client.setScreen(new MainScreen(this)));
@@ -900,6 +925,12 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	}
 
 	private void onHudRender(DrawContext drawContext, RenderTickCounter tickCounter) {
+		long hudStart = System.nanoTime();
+		drawHud(drawContext, tickCounter);
+		DevLogger.INSTANCE.perf(DevLogger.PERF_HUD, System.nanoTime() - hudStart);
+	}
+
+	private void drawHud(DrawContext drawContext, RenderTickCounter tickCounter) {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (client.options.hudHidden || client.textRenderer == null) return;
 		// Each element is drawn where Settings > Move HUD put it (see HudLayout).

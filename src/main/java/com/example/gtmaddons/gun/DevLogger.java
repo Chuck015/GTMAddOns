@@ -70,6 +70,8 @@ public final class DevLogger {
 	private boolean saveLog = true;
 	private final MovementDebugger movement = new MovementDebugger(this);
 	private final SwingDebugger swing = new SwingDebugger(this);
+	private final MeleeDamageDebugger melee = new MeleeDamageDebugger(this);
+	private final NetLauncherDebugger netLauncher = new NetLauncherDebugger(this);
 	private final NearLogger near = new NearLogger(this);
 	private com.example.gtmaddons.PvpCategory lastCategory = null;
 
@@ -141,11 +143,56 @@ public final class DevLogger {
 
 	// ---- Per frame ----
 
+	// ---- Performance (dev filter "Performance") ----
+
+	public static final int PERF_HOOKS = 0, PERF_DEV = 1, PERF_HUD = 2;
+	private static final long PERF_REPORT_NANOS = 10_000_000_000L;
+	private final long[] perfTotal = new long[3];
+	private final long[] perfMax = new long[3];
+	private int perfFrames = 0;
+	private long perfWindowStart = 0L;
+
+	/** Time one of the mod's per-frame parts took (see PERF_*); a report is written every 10 seconds. */
+	public void perf(int part, long nanos) {
+		if (!wants(DevFilter.PERFORMANCE)) return;
+		perfTotal[part] += nanos;
+		perfMax[part] = Math.max(perfMax[part], nanos);
+		if (part == PERF_HOOKS) perfFrames++;
+		long now = System.nanoTime();
+		if (perfWindowStart == 0L) perfWindowStart = now;
+		if (now - perfWindowStart >= PERF_REPORT_NANOS && perfFrames > 0) reportPerf(now);
+	}
+
+	private void reportPerf(long now) {
+		double seconds = (now - perfWindowStart) / 1e9;
+		int frames = perfFrames;
+		double frameMs = 1000.0 * seconds / frames;
+		double hooks = perfTotal[PERF_HOOKS] / 1e6 / frames, hooksMax = perfMax[PERF_HOOKS] / 1e6;
+		double dev = perfTotal[PERF_DEV] / 1e6 / frames, devMax = perfMax[PERF_DEV] / 1e6;
+		double hud = perfTotal[PERF_HUD] / 1e6 / frames, hudMax = perfMax[PERF_HUD] / 1e6;
+		double mod = hooks + hud;
+		double share = 100.0 * mod / frameMs;
+		String line = String.format("PERF  last %.0f s, %d frames (%.0f fps): the mod costs %.3f ms a frame = %.2f%% of a %.1f ms frame"
+				+ " | frame hooks %.3f ms avg / %.2f max, HUD %.3f ms avg / %.2f max"
+				+ " | dev tools themselves %.3f ms avg / %.2f max (not counted above)",
+				seconds, frames, frames / seconds, mod, share, frameMs, hooks, hooksMax, hud, hudMax, dev, devMax);
+		openWindow(MinecraftClient.getInstance());
+		add(line);
+		// Chat only when it matters.
+		if (share >= 3.0) chat(String.format("Performance: the mod uses %.2f%% of each frame (%.3f ms) - see the dev log", share, mod), Formatting.RED);
+		java.util.Arrays.fill(perfTotal, 0L);
+		java.util.Arrays.fill(perfMax, 0L);
+		perfFrames = 0;
+		perfWindowStart = now;
+	}
+
 	public void onFrame(MinecraftClient client) {
 		if (!enabled) return;
 		if (windowEndNanos != 0L && System.nanoTime() >= windowEndNanos) flushWindow();
 		movement.onFrame(client);
 		if (wants(DevFilter.SWINGS)) swing.onFrame(client);
+		if (wants(DevFilter.MELEE_DAMAGE)) melee.onFrame(client);
+		if (wants(DevFilter.NET_LAUNCHER)) netLauncher.onFrame(client);
 		near.onFrame();
 		reportCategoryChange(client);
 
@@ -168,6 +215,17 @@ public final class DevLogger {
 		lastAmmo = ammo;
 	}
 
+	/** Better near hid a /near reply that came without a command (see NearList.isUnsolicitedReply). */
+	public void noteHiddenNear(Text text) {
+		if (!enabled || !wants(DevFilter.NEAR)) return;
+		openWindow(client());
+		add("HIDDEN near reply (no command was run in the 15 s before it): " + describe(text));
+	}
+
+	private static MinecraftClient client() {
+		return MinecraftClient.getInstance();
+	}
+
 	/** A command you sent (without the slash) - /near's reply gets captured (see NearLogger). */
 	public void onCommand(String command) {
 		if (wants(DevFilter.NEAR)) near.onCommand(command);
@@ -176,6 +234,7 @@ public final class DevLogger {
 	/** A left click, just before the game handles it (see SwingDebugger). */
 	public void beforeAttack(MinecraftClient client, int attackCooldown) {
 		if (wants(DevFilter.SWINGS)) swing.beforeAttack(client, attackCooldown);
+		if (wants(DevFilter.MELEE_DAMAGE)) melee.beforeAttack(client);
 	}
 
 	/** The same left click, just after. */
@@ -184,8 +243,14 @@ public final class DevLogger {
 	}
 
 	/** Says in chat whenever your PvP category changes, and what it's based on. */
+	private long lastCategoryCheckNanos = 0L;
+
 	private void reportCategoryChange(MinecraftClient client) {
 		if (client.player == null) return;
+		// The category only changes when the inventory does: a few checks a second are plenty.
+		long checkedAt = System.nanoTime();
+		if (checkedAt - lastCategoryCheckNanos < 250_000_000L) return;
+		lastCategoryCheckNanos = checkedAt;
 		com.example.gtmaddons.PvpCategory category = com.example.gtmaddons.PvpCategory.classify(client.player);
 		if (category == lastCategory) return;
 		lastCategory = category;
@@ -222,6 +287,8 @@ public final class DevLogger {
 	public void onShotResult(ShotResult r) {
 		if (!enabled) return;
 		burstResults.add(r);
+		String netReason = ShotTracker.INSTANCE.takeNetNote();
+		if (netReason != null && wants(DevFilter.NET_LAUNCHER)) netLauncher.onResult(MinecraftClient.getInstance(), r, netReason);
 		if (!windowOpen() || !wants(DevFilter.SHOTS)) return;
 		StringBuilder line = new StringBuilder("RESULT  [").append(r.category().label).append("] ").append(r.gun()).append(": ");
 		if (r.hit()) {
@@ -253,6 +320,7 @@ public final class DevLogger {
 	private void onShot(MinecraftClient client, ItemStack gun, int ammoBefore, int ammoAfter) {
 		openWindow(client);
 		shotNumber++;
+		if (wants(DevFilter.NET_LAUNCHER) && ShotTracker.countsOnlyWingsuitHits(ShotTracker.gunName(gun.getName().getString()))) netLauncher.onShot(client);
 
 		if (wants(DevFilter.SHOTS)) {
 			add(String.format("SHOT #%d  gun=\"%s\"  ammo %d -> %d", shotNumber, gun.getName().getString(), ammoBefore, ammoAfter));
@@ -274,6 +342,7 @@ public final class DevLogger {
 		if (involvesMe) {
 			openWindow(client);
 			if (causeId == me && entityId != me && wants(DevFilter.SWINGS)) swing.onHit(entityName(entityId));
+			if (causeId == me && entityId != me && wants(DevFilter.MELEE_DAMAGE)) melee.onHit(client, entityId, damageType);
 			if (causeId == me) meleeDealt++;
 			if (entityId == me) meleeTaken++;
 		}

@@ -1,5 +1,6 @@
 package com.example.gtmaddons.stats;
 
+import com.example.gtmaddons.update.Updater;
 import com.example.gtmaddons.ComboTracker;
 import com.example.gtmaddons.FightTracker;
 import com.example.gtmaddons.PvpCategory;
@@ -205,7 +206,11 @@ public final class StatsClient {
 	 * from another account (before a switch) stay queued until that account
 	 * signs back in, since only it can prove they're its own.
 	 */
+	/** The backend refused this mod version (HTTP 426); uploads wait for the updated mod. */
+	private volatile boolean updateRequired = false;
+
 	private void flush() {
+		if (updateRequired) return;
 		try {
 			UUID account = currentAccount();
 			if (account == null) return;
@@ -215,6 +220,11 @@ public final class StatsClient {
 				if (response.statusCode() == 400) {
 					// The backend rejected it outright - retrying won't help.
 					LOGGER.warn("GTMAddOns: backend rejected a fight: {}", response.body());
+				} else if (response.statusCode() == 426) {
+					// This version is too old for the backend: keep the fights for after the update.
+					updateRequired = true;
+					Updater.INSTANCE.onUpdateRequired();
+					return;
 				} else if (response.statusCode() != 200) {
 					LOGGER.warn("GTMAddOns: fight upload failed (HTTP {}), will retry", response.statusCode());
 					return;
@@ -384,6 +394,7 @@ public final class StatsClient {
 		HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(BACKEND_URL + path))
 				.timeout(Duration.ofSeconds(15))
 				.header("Content-Type", "application/json")
+				.header("X-GTMAddOns-Version", Updater.modVersion())
 				.method(method, jsonBody == null
 						? HttpRequest.BodyPublishers.noBody()
 						: HttpRequest.BodyPublishers.ofString(jsonBody));

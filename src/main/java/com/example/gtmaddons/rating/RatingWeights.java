@@ -1,5 +1,6 @@
 package com.example.gtmaddons.rating;
 
+import com.example.gtmaddons.PvpCategory;
 import com.example.gtmaddons.gun.GunType;
 
 import java.util.Locale;
@@ -43,47 +44,81 @@ public final class RatingWeights {
 
 	// ========================================================================
 	//  1. AIM
-	//     Per gun: points per shot, compared to that gun's baseline.
-	//     score = 50 x (points per shot / baseline), capped at 100.
+	//     Per gun: points per shot, compared to the baseline for that gun in
+	//     that PvP category. A player exactly at the baseline scores 50.
+	//
+	//       ratio = points per shot / baseline
+	//       score = 100 x ratio^AIM_CURVE / (1 + ratio^AIM_CURVE)
+	//
+	//     so 0.5x the baseline scores about 15, 1.5x about 73 and 2x about 85,
+	//     and nobody hits a hard 0 or 100. Guns with few shots are pulled
+	//     toward 50 (see AIM_PRIOR_SHOTS), so a lucky 25 shots can't score 95.
 	// ========================================================================
 
-	/** Points a single shot earns. A miss earns 0. */
+	/**
+	 * Points a single shot earns. A miss earns 0. Body shots are worth 0.75 of a
+	 * headshot: headshot counts were too low before 2026-10-01 (the killing shot
+	 * of a fight was dropped, and it is usually a headshot), and a small headshot
+	 * premium keeps the rating mostly about hitting. Revisit once a few weeks of
+	 * fixed data are in.
+	 */
 	public static final double HEADSHOT_POINTS = 1.0;
-	public static final double BODY_SHOT_POINTS = 0.6;
+	public static final double BODY_SHOT_POINTS = 0.75;
 
 	/** Shots a gun needs (in that category) before it counts toward aim. */
 	public static final int MIN_SHOTS_PER_GUN = 20;
 	/** Past this many shots, more shots don't make a gun count for more. */
 	public static final int SHOT_WEIGHT_CAP = 300;
 
+	/** How steep the score is around 50: higher spreads players out more (1 = gentle, 3 = steep). */
+	public static final double AIM_CURVE = 2.5;
+	/** A gun's points per shot count as if the player had also fired this many shots at exactly the baseline. */
+	public static final int AIM_PRIOR_SHOTS = 50;
+
+	/**
+	 * Points per shot that scores 50 for a typical gun, per PvP category: the median of
+	 * the players with data (2026-10-02: 13 players, about 30,000 shots; shots per player
+	 * 90 to 3,700). Aim in Air and JP is lower because hitting while flying or in a
+	 * jetpack fight is harder. Recalibrate with the saved query when there are more players.
+	 */
+	private static final Map<PvpCategory, Double> CATEGORY_BASELINE = Map.of(
+			PvpCategory.GROUND, 0.145,
+			PvpCategory.WING,   0.130,
+			PvpCategory.AIR,    0.088,
+			PvpCategory.JP,     0.087);
+	private static final double DEFAULT_CATEGORY_BASELINE = 0.110;
+
 	/**
 	 * Per kind of gun:
-	 *   impact   - how much the gun counts in the aim average. Harder, more
-	 *              skill-based guns count more; splash or utility less.
-	 *   baseline - points per shot that scores 50. Lower = the gun is harder
-	 *              to land shots with, so the same accuracy scores higher.
+	 *   impact - how much the gun counts in the aim average. Harder, more
+	 *            skill-based guns count more; splash or utility less.
+	 *   factor - how hard the gun is to land shots with, against a rifle or SMG
+	 *            (1.0). The gun's baseline = the category's baseline x factor, so the
+	 *            same accuracy scores higher with a harder gun. From the data: snipers
+	 *            land far more shots per trigger pull (1.5x), machine guns and
+	 *            shotguns far fewer (shotguns are mostly used to move).
 	 */
 	private static final Map<GunType, Gun> BY_TYPE = Map.of(
-			//                            impact  baseline
-			GunType.SNIPER,      new Gun(  1.3,    0.35 ),
-			GunType.RIFLE,       new Gun(  1.2,    0.30 ),
-			GunType.SMG,         new Gun(  1.0,    0.25 ),
-			GunType.SHOTGUN,     new Gun(  1.0,    0.35 ),
-			GunType.MACHINE_GUN, new Gun(  1.0,    0.22 ),
-			GunType.PISTOL,      new Gun(  0.9,    0.30 ),
-			GunType.LAUNCHER,    new Gun(  0.5,    0.30 ));
+			//                            impact  factor
+			GunType.SNIPER,      new Gun(  1.3,    1.5  ),
+			GunType.RIFLE,       new Gun(  1.2,    1.0  ),
+			GunType.SMG,         new Gun(  1.0,    1.0  ),
+			GunType.SHOTGUN,     new Gun(  1.0,    0.30 ),
+			GunType.MACHINE_GUN, new Gun(  1.0,    0.65 ),
+			GunType.PISTOL,      new Gun(  0.9,    1.2  ),
+			GunType.LAUNCHER,    new Gun(  0.5,    1.0  ));
 
 	/**
 	 * Single guns that don't fit their type (or have none), by name in
 	 * lowercase. These win over BY_TYPE.
 	 */
 	private static final Map<String, Gun> BY_NAME = Map.of(
-			//                            impact  baseline
-			"net launcher",      new Gun(  0.4,    0.30 ),
-			"musket",            new Gun(  1.1,    0.35 ));
+			//                            impact  factor
+			"net launcher",      new Gun(  0.4,    1.0  ),
+			"musket",            new Gun(  1.1,    1.5  ));
 
 	/** Any gun not listed above. */
-	private static final Gun DEFAULT_GUN = new Gun(1.0, 0.30);
+	private static final Gun DEFAULT_GUN = new Gun(1.0, 1.0);
 
 	// ========================================================================
 	//  2. SWAPS (Wing, Air)
@@ -206,7 +241,7 @@ public final class RatingWeights {
 	// ========================================================================
 
 	/** One row of the gun tables: see BY_TYPE. */
-	private record Gun(double impact, double baseline) {}
+	private record Gun(double impact, double factor) {}
 
 	private static Gun gun(String name) {
 		Gun byName = BY_NAME.get(name.toLowerCase(Locale.ROOT));
@@ -219,7 +254,8 @@ public final class RatingWeights {
 		return gun(gun).impact();
 	}
 
-	public static double baseline(String gun) {
-		return gun(gun).baseline();
+	/** Points per shot that scores 50 for this gun in this PvP category. */
+	public static double baseline(PvpCategory category, String gun) {
+		return CATEGORY_BASELINE.getOrDefault(category, DEFAULT_CATEGORY_BASELINE) * gun(gun).factor();
 	}
 }

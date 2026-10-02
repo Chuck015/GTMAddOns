@@ -312,9 +312,22 @@ public final class ComboTracker {
 	}
 
 	/** Whether you're holding a melee weapon right now. */
+	/** The last stack checked, and the answer: the HUD asks twice a frame, and the check reads the item's name several times. */
+	private static ItemStack meleeStack = null;
+	private static Object meleeName = null;
+	private static boolean meleeResult = false;
+
 	private static boolean holdingMelee() {
 		ClientPlayerEntity me = MinecraftClient.getInstance().player;
-		return me != null && isMeleeItem(me.getMainHandStack());
+		if (me == null) return false;
+		ItemStack held = me.getMainHandStack();
+		Object name = held.isEmpty() ? null : held.getName();
+		if (held != meleeStack || name != meleeName) {
+			meleeStack = held;
+			meleeName = name;
+			meleeResult = isMeleeItem(held);
+		}
+		return meleeResult;
 	}
 
 	private static String name(PlayerEntity player) {

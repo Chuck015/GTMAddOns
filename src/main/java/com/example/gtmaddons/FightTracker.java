@@ -80,7 +80,31 @@ public final class FightTracker {
 		final List<ComboTracker.ComboResult> combos = new ArrayList<>();
 	}
 
+	/** A fight that has ended but is held briefly, so shot results still on their way can join it. */
+	private static final class Closing {
+		final Current fight;
+		final String outcome, opponent;
+		final long endedAt, nanos;
+
+		Closing(Current fight, String outcome, String opponent, long endedAt, long nanos) {
+			this.fight = fight;
+			this.outcome = outcome;
+			this.opponent = opponent;
+			this.endedAt = endedAt;
+			this.nanos = nanos;
+		}
+	}
+
+	/**
+	 * A shot's result is produced ~150 ms after it is fired (ShotTracker.SETTLE_NANOS), but the kill
+	 * message that ends a fight arrives within a few ms of the killing shot - so a closed fight waits
+	 * this long before it is handed over, and takes shots fired up to SHOT_GRACE_MILLIS after it ended.
+	 */
+	private static final long CLOSE_GRACE_NANOS = 400_000_000L;
+	private static final long SHOT_GRACE_MILLIS = 100L;
+
 	private final List<Consumer<Fight>> listeners = new ArrayList<>();
+	private final List<Closing> closing = new ArrayList<>();
 	private Current current = null;
 	/** When WASTED showed, while waiting for the subtitle naming the killer (-1 = not waiting). */
 	private long deathTitleNanos = -1L;
@@ -109,6 +133,14 @@ public final class FightTracker {
 	}
 
 	public void addShot(ShotResult shot) {
+		// The killing shot (or the last ones before a death) finish after the fight closed.
+		for (int i = closing.size() - 1; i >= 0; i--) {
+			Closing c = closing.get(i);
+			if (shot.timestampMillis() <= c.endedAt + SHOT_GRACE_MILLIS && shot.timestampMillis() >= c.fight.startedAt) {
+				c.fight.shots.add(shot);
+				return;
+			}
+		}
 		if (current != null) current.shots.add(shot);
 	}
 
@@ -119,6 +151,8 @@ public final class FightTracker {
 	// ---- Start and end ----
 
 	public void onFrame(MinecraftClient client) {
+		long nowNanos = System.nanoTime();
+		while (!closing.isEmpty() && nowNanos - closing.get(0).nanos >= CLOSE_GRACE_NANOS) finish(closing.remove(0));
 		ClientPlayerEntity player = client.player;
 		// WASTED with no subtitle in time: still a death, just no killer name.
 		if (deathTitleNanos >= 0 && System.nanoTime() - deathTitleNanos > SUBTITLE_WAIT_NANOS) {
@@ -190,9 +224,15 @@ public final class FightTracker {
 
 	private void end(String outcome, String opponent) {
 		beforeFightEnds.run();
-		Current fight = current;
+		closing.add(new Closing(current, outcome, opponent, System.currentTimeMillis(), System.nanoTime()));
 		current = null;
-		Fight done = new Fight(UUID.randomUUID().toString().replace("-", ""), fight.startedAt, System.currentTimeMillis(),
+	}
+
+	/** Hands a closed fight to the listeners (stats upload, Personal Stats), once late shot results have joined it. */
+	private void finish(Closing c) {
+		Current fight = c.fight;
+		String outcome = c.outcome, opponent = c.opponent;
+		Fight done = new Fight(UUID.randomUUID().toString().replace("-", ""), fight.startedAt, c.endedAt,
 				outcome, opponent, fight.category, List.copyOf(fight.swaps), List.copyOf(fight.shots), List.copyOf(fight.combos));
 		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) {
 			DevLogger.chat(String.format("Fight recorded (%s): %s%s | %.0fs | %d swaps, %d shots, %d combos",

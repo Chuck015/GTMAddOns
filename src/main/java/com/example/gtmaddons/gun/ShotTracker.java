@@ -50,6 +50,8 @@ public final class ShotTracker {
 
 	public static final ShotTracker INSTANCE = new ShotTracker();
 
+	private static final Pattern NOT_NAME = Pattern.compile("[^\\p{L}\\p{N} '\\-]");
+	private static final Pattern SPACES = Pattern.compile("\\s+");
 	private static final Pattern AMMO_PATTERN = Pattern.compile("(\\d+)\\s*/\\s*(\\d+)");
 	private static final Pattern KILL_PATTERN = Pattern.compile("You killed (\\w{1,16})");
 	private static final String HEADSHOT_MARKER = "⊕";
@@ -75,6 +77,8 @@ public final class ShotTracker {
 		final double distance;
 		/** DAMAGE only: the target was a player wearing a wingsuit (or gliding). */
 		final boolean onWingsuit;
+		/** DAMAGE only: the target's chest item and gliding state then (dev mode's Net Launcher output). */
+		final String gear;
 		boolean claimed;
 
 		Event(long nanos, Kind kind, String detail, double distance) {
@@ -82,11 +86,16 @@ public final class ShotTracker {
 		}
 
 		Event(long nanos, Kind kind, String detail, double distance, boolean onWingsuit) {
+			this(nanos, kind, detail, distance, onWingsuit, "");
+		}
+
+		Event(long nanos, Kind kind, String detail, double distance, boolean onWingsuit, String gear) {
 			this.nanos = nanos;
 			this.kind = kind;
 			this.detail = detail;
 			this.distance = distance;
 			this.onWingsuit = onWingsuit;
+			this.gear = gear;
 		}
 	}
 
@@ -121,10 +130,22 @@ public final class ShotTracker {
 	private final List<Event> events = new ArrayList<>();
 
 	private String lastGun = null;
+	private Object parsedNameKey = null;
+	private Integer parsedAmmo = null;
+	private String parsedGun = null;
 	private Integer lastAmmo = null;
 	private boolean useWasPressed = false;
 	private long triggerPulledNanos = -1L;
 	private double lastFrameBps = 0.0;
+
+	/** Why the latest Net Launcher shot was a hit or a miss (null if the last shot wasn't one); read by dev mode. */
+	private String netNote = null;
+
+	public String takeNetNote() {
+		String note = netNote;
+		netNote = null;
+		return note;
+	}
 
 	private ShotTracker() {}
 
@@ -154,9 +175,16 @@ public final class ShotTracker {
 			useWasPressed = false;
 		} else {
 			ItemStack held = player.getStackInHand(Hand.MAIN_HAND);
-			String name = held.isEmpty() ? "" : held.getName().getString();
-			Integer ammo = parseAmmo(name);
-			String gun = ammo != null ? gunName(name) : null;
+			Object nameKey = held.isEmpty() ? null : held.getName();
+			// The name only changes when the item or its ammo count does: parse it then, not every frame.
+			if (nameKey != parsedNameKey) {
+				parsedNameKey = nameKey;
+				String name = nameKey == null ? "" : held.getName().getString();
+				parsedAmmo = parseAmmo(name);
+				parsedGun = parsedAmmo != null ? gunName(name) : null;
+			}
+			Integer ammo = parsedAmmo;
+			String gun = parsedGun;
 
 			boolean usePressed = client.options.useKey.isPressed();
 			if (usePressed && !useWasPressed && gun != null) triggerPulledNanos = now;
@@ -194,13 +222,20 @@ public final class ShotTracker {
 		if (client.player == null || causeId != client.player.getId()) return;
 		String name = target != null ? target.getName().getString() : "unknown";
 		double distance = target != null ? client.player.distanceTo(target) : Double.NaN;
-		events.add(new Event(System.nanoTime(), Kind.DAMAGE, name, distance, isOnWingsuit(target)));
+		events.add(new Event(System.nanoTime(), Kind.DAMAGE, name, distance, isOnWingsuit(target), describeGear(target)));
 	}
 
 	/** A player wearing a wingsuit (a glider in the chest slot), or gliding right now. */
 	public static boolean isOnWingsuit(Entity entity) {
 		return entity instanceof PlayerEntity player
 				&& (player.isGliding() || PvpCategory.isWingsuit(player.getEquippedStack(EquipmentSlot.CHEST)));
+	}
+
+	/** For dev mode: what a damaged player had on their chest and whether they were gliding. */
+	private static String describeGear(Entity entity) {
+		if (!(entity instanceof PlayerEntity player)) return "not a player";
+		var chest = player.getEquippedStack(EquipmentSlot.CHEST);
+		return String.format("chest \"%s\", gliding %s", chest.isEmpty() ? "-" : chest.getName().getString(), player.isGliding());
 	}
 
 	/**
@@ -238,12 +273,17 @@ public final class ShotTracker {
 		double distance = Double.NaN;
 		List<String> otherSounds = new ArrayList<>();
 		boolean wingsuitOnly = countsOnlyWingsuitHits(shot.gun);
+		List<String> damageNotes = new ArrayList<>();
 
 		for (Event event : events) {
 			if (event.claimed || nearestShot(event) != shot) continue;
 			event.claimed = true;
 			switch (event.kind) {
 				case DAMAGE -> {
+					if (wingsuitOnly) {
+						damageNotes.add(String.format("damage on %s at %.1f blocks, %d ms after the shot, %s, counts as wingsuit: %s",
+								event.detail, event.distance, (event.nanos - shot.nanos) / 1_000_000L, event.gear, event.onWingsuit));
+					}
 					if (wingsuitOnly && !event.onWingsuit) continue;
 					if (!hit) {
 						target = event.detail;
@@ -260,6 +300,7 @@ public final class ShotTracker {
 			}
 		}
 
+		if (wingsuitOnly) netNote = describeNetShot(shot, hit, damageNotes);
 		gunshotSound = pickGunshotSound(otherSounds);
 		if (gunshotSound != null) otherSounds.remove(gunshotSound);
 
@@ -268,6 +309,24 @@ public final class ShotTracker {
 				shot.responseNanos != null ? shot.responseNanos / 1_000_000L : null,
 				ping(client), otherSounds, shot.category,
 				shot.speedBeforeBps, shot.speedBeforeBps != null ? shot.peakBps : null);
+	}
+
+	/** The reason for a Net Launcher shot's verdict, for dev mode (see NetLauncherDebugger). */
+	private String describeNetShot(Shot shot, boolean hit, List<String> damageNotes) {
+		StringBuilder note = new StringBuilder();
+		if (hit) note.append("counted as a HIT: the damage was on a player on a wingsuit");
+		else if (damageNotes.isEmpty()) note.append("counted as a MISS: no damage event within ").append(MATCH_NANOS / 1_000_000L).append(" ms of the shot");
+		else note.append("counted as a MISS: the damage was on someone not on a wingsuit (the net only catches wingsuit users)");
+		if (!damageNotes.isEmpty()) note.append(" [").append(String.join("; ", damageNotes)).append("]");
+		for (Event event : events) {
+			if (event.kind != Kind.DAMAGE || event.claimed) continue;
+			long gapMs = (event.nanos - shot.nanos) / 1_000_000L;
+			if (Math.abs(gapMs) <= 300) {
+				note.append(String.format(" [damage on %s %d ms from the shot is outside the %d ms match window, not counted]",
+						event.detail, gapMs, MATCH_NANOS / 1_000_000L));
+			}
+		}
+		return note.toString();
 	}
 
 	/**
@@ -320,7 +379,7 @@ public final class ShotTracker {
 	/** "Combat MG «49/29897»" -> "Combat MG". */
 	static String gunName(String itemName) {
 		String withoutAmmo = AMMO_PATTERN.matcher(itemName).replaceAll("");
-		String cleaned = withoutAmmo.replaceAll("[^\\p{L}\\p{N} '\\-]", "").trim().replaceAll("\\s+", " ");
+		String cleaned = SPACES.matcher(NOT_NAME.matcher(withoutAmmo).replaceAll("")).replaceAll(" ").trim();
 		if (cleaned.isEmpty()) cleaned = "Unknown gun";
 		return cleaned.length() > 48 ? cleaned.substring(0, 48) : cleaned;
 	}

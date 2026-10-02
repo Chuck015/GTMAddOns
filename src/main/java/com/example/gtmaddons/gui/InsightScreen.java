@@ -594,7 +594,7 @@ public class InsightScreen extends Screen {
 		List<Row> each = new ArrayList<>();
 		each.add(new TableRow(new String[] { "Gun", "Shots", "Hit", "HS", "K", "Aim" }, Ui.MUTED, true));
 		for (GunStat g : guns) {
-			Double aim = Ratings.gunAim(g.gun(), g.shots(), g.hits(), g.headshots());
+			Double aim = Ratings.gunAim(category, g.gun(), g.shots(), g.hits(), g.headshots());
 			each.add(new TableRow(new String[] { g.gun(), String.valueOf(g.shots()),
 					pct(g.shots() > 0 ? (double) g.hits() / g.shots() : Double.NaN),
 					pct(g.hits() > 0 ? (double) g.headshots() / g.hits() : Double.NaN),

@@ -22,9 +22,10 @@ import java.util.Map;
  *
  *   Aim:      per gun used in this category, points per shot -
  *             headshots worth HEADSHOT_POINTS, body shots BODY_SHOT_POINTS,
- *             misses nothing - against that gun's baseline, so 50 means
- *             baseline and 100 twice it. Guns are averaged, weighted by how
- *             much the gun counts (impact) and how many shots (capped).
+ *             misses nothing - against that gun's baseline in this category
+ *             (the median player = 50, 2x the baseline about 85, 0.5x about
+ *             15), with few shots pulled toward 50. Guns are averaged, weighted
+ *             by how much the gun counts (impact) and how many shots (capped).
  *   Movement: Wing - swap score and momentum kept (see Overall).
  *             Air - the swap score over all Air swaps, on the AIR_ bounds.
  *             Ground - speed right after movement gun
@@ -118,7 +119,7 @@ public final class Ratings {
 		for (Map.Entry<String, long[]> e : sorted) {
 			String gun = e.getKey();
 			long shots = e.getValue()[0], hits = e.getValue()[1], headshots = e.getValue()[2];
-			Double gunScore = gunAim(gun, shots, hits, headshots);
+			Double gunScore = gunAim(category, gun, shots, hits, headshots);
 			if (gunScore == null) continue;
 			double score = gunScore;
 			double hs = (double) headshots / shots;
@@ -139,14 +140,19 @@ public final class Ratings {
 	}
 
 	/**
-	 * One gun's aim score: points per shot against the gun's baseline (50 =
-	 * baseline, 100 = twice it). Null under MIN_SHOTS_PER_GUN.
+	 * One gun's aim score in a PvP category (see RatingWeights section 1): points per shot
+	 * against the baseline (50 = the baseline), on a smooth curve, with few shots pulled
+	 * toward 50. Null under MIN_SHOTS_PER_GUN.
 	 */
-	public static Double gunAim(String gun, long shots, long hits, long headshots) {
+	public static Double gunAim(PvpCategory category, String gun, long shots, long hits, long headshots) {
 		if (shots < RatingWeights.MIN_SHOTS_PER_GUN) return null;
-		double points = ((double) headshots * RatingWeights.HEADSHOT_POINTS
-				+ (double) (hits - headshots) * RatingWeights.BODY_SHOT_POINTS) / shots;
-		return clamp(RatingWeights.SCORE_AT_BASELINE * points / RatingWeights.baseline(gun));
+		double baseline = RatingWeights.baseline(category, gun);
+		double points = (double) headshots * RatingWeights.HEADSHOT_POINTS
+				+ (double) (hits - headshots) * RatingWeights.BODY_SHOT_POINTS;
+		// Pull toward the baseline: as if AIM_PRIOR_SHOTS more shots were fired exactly at it.
+		double perShot = (points + baseline * RatingWeights.AIM_PRIOR_SHOTS) / (shots + RatingWeights.AIM_PRIOR_SHOTS);
+		double curved = Math.pow(perShot / baseline, RatingWeights.AIM_CURVE);
+		return clamp(100.0 * curved / (1.0 + curved));
 	}
 
 	// ---- Wing: the composite ----
