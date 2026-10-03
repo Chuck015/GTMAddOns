@@ -46,6 +46,15 @@ final class StatsOverview {
 	private static boolean cachedIndividual;
 	private static Data cachedData;
 	private static Ratings.Result cachedRatings;
+	/** The category's accent, and the color of the next iconAndBig number (reset to white after each use). */
+	private static int accent = 0;
+	private static PvpCategory current = PvpCategory.GROUND;
+	private static int bigColor = Ui.TEXT;
+
+	/** Green / yellow / red for a rate (0-1), like the insight pages; white when there is no data. */
+	private static int rate(double fraction) {
+		return Double.isNaN(fraction) ? Ui.TEXT : Ui.rateColor(fraction * 100);
+	}
 
 	static final int ROW_A = 94;
 	static final int ROW_B = 106;
@@ -71,6 +80,9 @@ final class StatsOverview {
 			cachedIndividual = individualGuns;
 		}
 		Data data = cachedData;
+		accent = Ui.accent(category);
+		current = category;
+		Ui.cardAccent = accent;
 		Insight hovered = null;
 
 		// Row A: two rings, the breakdown, the fights strip.
@@ -154,6 +166,7 @@ final class StatsOverview {
 			return;
 		}
 		double kd = PlayerScreen.kd(d.detail.kills(), d.detail.deaths());
+		bigColor = PlayerScreen.kdColor(kd);
 		ringWithNumber(context, font, x, y, w, h, Math.min(1.0, kd / 2.0), Ui.gradient(kd / 2.0),
 				String.format("%.2f", kd), d.detail.kills() + "K  " + d.detail.deaths() + "D");
 	}
@@ -164,6 +177,7 @@ final class StatsOverview {
 		String second = r.movement() != null ? Ratings.secondShort(category) + " " + Math.round(r.movement()) : null;
 		String sub = r.aim() != null ? Ratings.aimShort(category) + " " + Math.round(r.aim()) + (second != null ? "  " + second : "")
 				: second != null ? second : "beta";
+		bigColor = overall != null ? Ui.scoreColor(overall) : Ui.TEXT;
 		ringWithNumber(context, font, x, y, w, h, overall != null ? overall / 100 : 0, overall != null ? Ui.gradient(overall / 100) : Ui.TRACK,
 				overall != null ? String.valueOf(Math.round(overall)) : "-", sub);
 	}
@@ -178,7 +192,8 @@ final class StatsOverview {
 		Ui.ring(context, cx, cy, r, thickness, fraction, color);
 		int inner = 2 * (r - thickness) - 8;
 		float scale = Math.max(1f, Math.min(2.6f, inner / (float) Math.max(1, font.getWidth(number))));
-		Ui.bigText(context, font, number, cx, cy - Math.round(5 * scale), scale, Ui.TEXT, true);
+		Ui.bigText(context, font, number, cx, cy - Math.round(5 * scale), scale, bigColor, true);
+		bigColor = Ui.TEXT;
 		if (sub != null && r > 18) {
 			String s = Ui.fit(font, sub, inner);
 			context.drawTextWithShadow(font, s, cx - font.getWidth(s) / 2, cy + Math.round(4 * scale) + 1, Ui.MUTED);
@@ -189,6 +204,7 @@ final class StatsOverview {
 	private static void breakdownCard(DrawContext context, TextRenderer font, Data d, PvpCategory category, int x, int y, int w, int h) {
 		List<Pie> pies = new ArrayList<>();
 		String title, prefix, big;
+		int headline = accent;
 		switch (category) {
 			case AIR -> {
 				title = "AIR SWAPS";
@@ -200,6 +216,7 @@ final class StatsOverview {
 				}
 				prefix = "Swaps";
 				big = pct(attempts > 0 ? (double) successes / attempts : Double.NaN);
+				headline = rate(attempts > 0 ? (double) successes / attempts : Double.NaN);
 				String[][] types = { { "JETPACK", "JP" }, { "WINGSUIT", "Wing" }, { "JP_TO_WING", "JP>W" }, { "WING_TO_JP", "W>JP" } };
 				for (String[] type : types) {
 					AirSwapStat s = stats.stream().filter(a -> type[0].equals(a.swapType())).findFirst().orElse(null);
@@ -214,8 +231,9 @@ final class StatsOverview {
 				double kept = c != null && c.ownCombos() > 0 ? 1 - (double) c.ownBroken() / c.ownCombos() : Double.NaN;
 				prefix = "Breaks";
 				big = pct(broke);
-				pies.add(new Pie("You broke", broke, Ui.BLUE, c != null ? c.enemyBroken() + "/" + c.enemyCombos() : "-"));
-				pies.add(new Pie("Kept yours", kept, Ui.ORANGE, c != null ? (c.ownCombos() - c.ownBroken()) + "/" + c.ownCombos() : "-"));
+				headline = rate(broke);
+				pies.add(new Pie("You broke", broke, rate(broke), c != null ? c.enemyBroken() + "/" + c.enemyCombos() : "-"));
+				pies.add(new Pie("Kept yours", kept, rate(kept), c != null ? (c.ownCombos() - c.ownBroken()) + "/" + c.ownCombos() : "-"));
 				long firstHits = c != null ? c.ownFirstHits() + c.enemyFirstHits() : 0;
 				pies.add(new Pie("First hit", firstHits > 0 ? (double) c.ownFirstHits() / firstHits : Double.NaN, Ui.BLUE,
 						firstHits > 0 ? c.ownFirstHits() + "/" + firstHits : "-"));
@@ -232,7 +250,7 @@ final class StatsOverview {
 		Ui.card(context, font, x, y, w, h, title);
 		// "Swaps 87%" - small gray prefix, big white number.
 		context.drawTextWithShadow(font, prefix, x + 8, y + 26, Ui.LABEL);
-		Ui.bigText(context, font, big, x + 12 + font.getWidth(prefix), y + 20, 2f, Ui.TEXT, false);
+		Ui.bigText(context, font, big, x + 12 + font.getWidth(prefix), y + 20, 2f, headline, false);
 		context.fill(x + 6, y + 42, x + w - 6, y + 43, Ui.CARD_BORDER);
 
 		pies(context, font, pies, x + 6, y, w - 12);
@@ -271,9 +289,11 @@ final class StatsOverview {
 		int labels = font.getWidth(rateLabel) + font.getWidth(timeLabel) + 8 + 16 + 12;
 		float scale = Ui.bigWidth(font, rate, 2f) + Ui.bigWidth(font, time, 2f) + labels <= w ? 2f : 1.5f;
 		context.drawTextWithShadow(font, rateLabel, x + 8, y + 26, Ui.LABEL);
-		Ui.bigText(context, font, rate, x + 12 + font.getWidth(rateLabel), y + 20, scale, Ui.TEXT, false);
+		Ui.bigText(context, font, rate, x + 12 + font.getWidth(rateLabel), y + 20, scale, rate(success), false);
 		int timeW = Ui.bigWidth(font, time, scale);
-		Ui.bigText(context, font, time, x + w - 8 - timeW, y + 20, scale, Ui.TEXT, false);
+		Ui.bigText(context, font, time, x + w - 8 - timeW, y + 20, scale,
+				avg != null && avg.totalMs() != null ? Ui.swapTimeColor(avg.totalMs(), com.example.gtmaddons.rating.RatingWeights.BEST_SWAP_MS,
+						com.example.gtmaddons.rating.RatingWeights.WORST_SWAP_MS) : Ui.TEXT, false);
 		context.drawTextWithShadow(font, timeLabel, x + w - 12 - timeW - font.getWidth(timeLabel), y + 26, Ui.LABEL);
 		context.fill(x + 6, y + 42, x + w - 6, y + 43, Ui.CARD_BORDER);
 
@@ -281,8 +301,8 @@ final class StatsOverview {
 		int half = (w - 12) / 2;
 		Double eff = avg != null ? avg.efficiency() : null;
 		pies(context, font, List.of(
-				new Pie("Success", success, Ui.BLUE, d.detail.successes() + "/" + attempts),
-				new Pie("Mouse", eff != null ? eff / 100 : Double.NaN, Ui.BLUE, "efficiency")), x + 6, y, half);
+				new Pie("Success", success, rate(success), d.detail.successes() + "/" + attempts),
+				new Pie("Mouse", eff != null ? eff / 100 : Double.NaN, rate(eff != null ? eff / 100 : Double.NaN), "efficiency")), x + 6, y, half);
 
 		// Right half: the time splits.
 		String[][] rows = {
@@ -331,6 +351,7 @@ final class StatsOverview {
 
 	private static void hitCard(DrawContext context, TextRenderer font, Data d, int x, int y, int w, int h) {
 		Ui.card(context, font, x, y, w, h, "HIT RATE");
+		bigColor = Ui.relativeColor(d.shots > 0 ? (double) d.hits / d.shots : Double.NaN, Ui.typicalHitRate(current));
 		iconAndBig(context, font, new ItemStack(Items.TARGET), pct(d.shots > 0 ? (double) d.hits / d.shots : Double.NaN), x, y, w);
 		rows(context, font, x, y, w, new String[][] {
 				{ "SHOTS", String.valueOf(d.shots) }, { "HITS", String.valueOf(d.hits) },
@@ -339,6 +360,7 @@ final class StatsOverview {
 
 	private static void headshotCard(DrawContext context, TextRenderer font, Data d, int x, int y, int w, int h) {
 		Ui.card(context, font, x, y, w, h, "HS%");
+		bigColor = Ui.relativeColor(d.hits > 0 ? (double) d.headshots / d.hits : Double.NaN, Ui.typicalHeadshotShare(current));
 		iconAndBig(context, font, new ItemStack(Items.SKELETON_SKULL), pct(d.hits > 0 ? (double) d.headshots / d.hits : Double.NaN), x, y, w);
 		rows(context, font, x, y, w, new String[][] {
 				{ "HEAD", String.valueOf(d.headshots) }, { "BODY", String.valueOf(d.hits - d.headshots) },
@@ -357,6 +379,7 @@ final class StatsOverview {
 				Averages avg = d.detail.avg();
 				Double before = avg != null ? avg.speedBeforeBps() : null, after = avg != null ? avg.speedAfterBps() : null;
 				boolean has = before != null && after != null;
+				bigColor = has ? rate(before > 0 ? after / before : 1) : Ui.TEXT;
 				iconAndBig(context, font, new ItemStack(Items.ELYTRA), has ? pct(before > 0 ? after / before : 1) : "-", x, y, w);
 				rows(context, font, x, y, w, new String[][] {
 						{ "BEFORE", Format.bps(before) }, { "AFTER", Format.bps(after) },
@@ -371,6 +394,8 @@ final class StatsOverview {
 					if (s.avgMs() != null) total += s.avgMs() * s.successes();
 					successes += s.successes();
 				}
+				bigColor = successes > 0 ? Ui.swapTimeColor(total / successes, com.example.gtmaddons.rating.RatingWeights.AIR_BEST_SWAP_MS,
+						com.example.gtmaddons.rating.RatingWeights.AIR_WORST_SWAP_MS) : Ui.TEXT;
 				iconAndBig(context, font, new ItemStack(Items.CLOCK), successes > 0 ? Format.seconds(total / successes) : "-", x, y, w);
 				rows(context, font, x, y, w, new String[][] {
 						{ "JETPACK", airAvg(stats, "JETPACK") }, { "WINGSUIT", airAvg(stats, "WINGSUIT") },
@@ -398,6 +423,8 @@ final class StatsOverview {
 					if (s.avgBps() != null) total += s.avgBps() * s.shots();
 					if (s.bestBps() != null) best = Math.max(best, s.bestBps());
 				}
+				bigColor = shots > 0 ? Ui.scoreColor(Math.max(0.0, Math.min(100.0, 100.0 * (total / shots - com.example.gtmaddons.rating.RatingWeights.MOVEMENT_FLOOR_BPS)
+						/ (com.example.gtmaddons.rating.RatingWeights.MOVEMENT_CEILING_BPS - com.example.gtmaddons.rating.RatingWeights.MOVEMENT_FLOOR_BPS)))) : Ui.TEXT;
 				iconAndBig(context, font, new ItemStack(Items.FEATHER), shots > 0 ? String.format("%.1f", total / shots) : "-", x, y, w);
 				rows(context, font, x, y, w, new String[][] {
 						{ "SAWED-OFF", movementAvg(stats, "Sawed-off Shotgun") }, { "PUMP", movementAvg(stats, "Pump Shotgun") },
@@ -469,8 +496,10 @@ final class StatsOverview {
 		for (GunTotal g : rows.subList(0, Math.min(5, rows.size()))) {
 			context.drawTextWithShadow(font, Ui.fit(font, g.name, nameW), left, ry, Ui.TEXT);
 			if (showShots) Ui.textRight(context, font, String.valueOf(g.shots), shotsRight, ry, Ui.TEXT);
-			Ui.textRight(context, font, pct(g.shots > 0 ? (double) g.hits / g.shots : Double.NaN), hitRight, ry, Ui.TEXT);
-			Ui.textRight(context, font, pct(g.hits > 0 ? g.hsRate() : Double.NaN), hsRight, ry, Ui.TEXT);
+			Ui.textRight(context, font, pct(g.shots > 0 ? (double) g.hits / g.shots : Double.NaN), hitRight, ry,
+					Ui.relativeColor(g.shots > 0 ? (double) g.hits / g.shots : Double.NaN, Ui.typicalHitRate(current)));
+			Ui.textRight(context, font, pct(g.hits > 0 ? g.hsRate() : Double.NaN), hsRight, ry,
+					Ui.relativeColor(g.hits > 0 ? g.hsRate() : Double.NaN, Ui.typicalHeadshotShare(current)));
 			if (showKills) Ui.textRight(context, font, String.valueOf(g.kills), right, ry, Ui.TEXT);
 			ry += 13;
 		}
@@ -486,7 +515,8 @@ final class StatsOverview {
 	private static void iconAndBig(DrawContext context, TextRenderer font, ItemStack icon, String value, int x, int y, int w) {
 		context.drawItem(icon, x + 6, y + 20);
 		float scale = Math.min(2f, (w - 32) / (float) Math.max(1, font.getWidth(value)));
-		Ui.bigText(context, font, value, x + 26, y + 22, Math.max(1f, scale), Ui.TEXT, false);
+		Ui.bigText(context, font, value, x + 26, y + 22, Math.max(1f, scale), bigColor, false);
+		bigColor = Ui.TEXT;
 		context.fill(x + 6, y + 42, x + w - 6, y + 43, Ui.CARD_BORDER);
 	}
 

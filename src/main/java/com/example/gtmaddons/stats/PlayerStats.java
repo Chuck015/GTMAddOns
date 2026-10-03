@@ -9,26 +9,6 @@ import java.util.List;
 public final class PlayerStats {
 	private PlayerStats() {}
 
-	public record PlayerList(List<PlayerSummary> players) {}
-
-	public record PlayerSummary(
-			String uuid,
-			String name,
-			long lastSeen,
-			int total,
-			int successes,
-			int failures,
-			int cancels,
-			Double avgMs,
-			Double bestMs,
-			long shots,
-			long hits,
-			long headshots,
-			int fights,
-			int kills,
-			int deaths
-	) {}
-
 	public record PlayerDetail(
 			String uuid,
 			String name,

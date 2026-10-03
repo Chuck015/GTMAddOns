@@ -1,6 +1,5 @@
 package com.example.gtmaddons.gui;
 
-import com.example.gtmaddons.stats.StatsClient;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -11,7 +10,6 @@ import java.util.concurrent.CompletionException;
 public final class Format {
 	private Format() {}
 
-	private static final DateTimeFormatter DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneId.systemDefault());
 	private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(ZoneId.systemDefault());
 
 	static String seconds(Double ms) {
@@ -28,10 +26,6 @@ public final class Format {
 
 	static String bps(Double bps) {
 		return bps == null ? "-" : String.format("%.1f b/s", bps);
-	}
-
-	static String date(long epochMillis) {
-		return DATE.format(Instant.ofEpochMilli(epochMillis));
 	}
 
 	static String time(long epochMillis) {

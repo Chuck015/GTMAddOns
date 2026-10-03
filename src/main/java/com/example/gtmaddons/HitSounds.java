@@ -77,10 +77,79 @@ public final class HitSounds {
 		}
 	}
 
-	/** Index into CHOICES of the saved sound (the first if it's unknown). */
-	public int selectedIndex() {
+	/** The kinds of hit that can each have their own sound. */
+	public enum Kind {
+		HEADSHOT("Headshot"), BODY("Body shot"), MELEE("Melee");
+
+		public final String label;
+
+		Kind(String label) {
+			this.label = label;
+		}
+	}
+
+	/** Whether this kind of hit plays a sound at all. */
+	public boolean enabledOf(Kind kind) {
+		return switch (kind) {
+			case HEADSHOT -> settings.hitSoundHeadshot;
+			case BODY -> settings.hitSoundBody;
+			case MELEE -> settings.hitSoundMelee;
+		};
+	}
+
+	public void setEnabled(Kind kind, boolean on) {
+		switch (kind) {
+			case HEADSHOT -> settings.hitSoundHeadshot = on;
+			case BODY -> settings.hitSoundBody = on;
+			case MELEE -> settings.hitSoundMelee = on;
+		}
+	}
+
+	/** The sound id for this kind: its own, or the body shot sound's until one is picked. */
+	public String idOf(Kind kind) {
+		String own = kind == Kind.HEADSHOT ? settings.hitSoundHeadshotId : kind == Kind.MELEE ? settings.hitSoundMeleeId : null;
+		return own != null ? own : settings.hitSoundId;
+	}
+
+	public float volumeOf(Kind kind) {
+		float own = kind == Kind.HEADSHOT ? settings.hitSoundHeadshotVolume : kind == Kind.MELEE ? settings.hitSoundMeleeVolume : -1.0f;
+		return own >= 0.0f ? own : settings.hitSoundVolume;
+	}
+
+	public float pitchOf(Kind kind) {
+		float own = kind == Kind.HEADSHOT ? settings.hitSoundHeadshotPitch : kind == Kind.MELEE ? settings.hitSoundMeleePitch : -1.0f;
+		return own > 0.0f ? own : settings.hitSoundPitch;
+	}
+
+	public void setId(Kind kind, String id) {
+		switch (kind) {
+			case HEADSHOT -> settings.hitSoundHeadshotId = id;
+			case MELEE -> settings.hitSoundMeleeId = id;
+			case BODY -> settings.hitSoundId = id;
+		}
+	}
+
+	public void setVolume(Kind kind, float volume) {
+		switch (kind) {
+			case HEADSHOT -> settings.hitSoundHeadshotVolume = volume;
+			case MELEE -> settings.hitSoundMeleeVolume = volume;
+			case BODY -> settings.hitSoundVolume = volume;
+		}
+	}
+
+	public void setPitch(Kind kind, float pitch) {
+		switch (kind) {
+			case HEADSHOT -> settings.hitSoundHeadshotPitch = pitch;
+			case MELEE -> settings.hitSoundMeleePitch = pitch;
+			case BODY -> settings.hitSoundPitch = pitch;
+		}
+	}
+
+	/** Index into CHOICES of this kind's sound (the first if it's unknown). */
+	public int selectedIndex(Kind kind) {
+		String id = idOf(kind);
 		for (int i = 0; i < CHOICES.size(); i++) {
-			if (CHOICES.get(i).id().equals(settings.hitSoundId)) return i;
+			if (CHOICES.get(i).id().equals(id)) return i;
 		}
 		return 0;
 	}
@@ -119,8 +188,8 @@ public final class HitSounds {
 		if (settings == null || !settings.hitSound) return;
 
 		boolean headshot = !melee && headshotNanos >= 0 && Math.abs(headshotNanos - hitNanos) <= HEADSHOT_MATCH_NANOS;
-		boolean wanted = melee ? settings.hitSoundMelee : headshot ? settings.hitSoundHeadshot : settings.hitSoundBody;
-		if (wanted) play(settings.hitSoundId, settings.hitSoundVolume, settings.hitSoundPitch);
+		Kind kind = melee ? Kind.MELEE : headshot ? Kind.HEADSHOT : Kind.BODY;
+		if (enabledOf(kind)) play(idOf(kind), volumeOf(kind), pitchOf(kind));
 	}
 
 	/** Plays a sound to you only, at the given volume (0-1) and pitch. Also used to preview in the menu. */

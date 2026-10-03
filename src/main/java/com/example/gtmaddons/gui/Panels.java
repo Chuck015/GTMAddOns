@@ -81,7 +81,8 @@ final class Panels {
 		for (Section section : sections) {
 			int h = section.height();
 			Ui.panel(context, x, y, w, h, accent);
-			context.drawTextWithShadow(font, section.title(), x + PAD, y + 5, accent);
+			// Same title style as the overview cards: bold caps in the category's accent.
+			context.drawTextWithShadow(font, net.minecraft.text.Text.literal(Ui.fit(font, section.title().toUpperCase(java.util.Locale.ROOT), w - 2 * PAD)).formatted(net.minecraft.util.Formatting.BOLD), x + PAD, y + 6, accent);
 			int rowY = y + HEADER + 2;
 			for (Row row : section.rows()) {
 				drawRow(context, font, row, x + PAD, rowY, w - 2 * PAD);
@@ -113,7 +114,7 @@ final class Panels {
 				for (int i = 1; i < t.cells().length; i++) {
 					Ui.textRight(context, font, t.cells()[i], x + w - (columns - i) * COLUMN_W, y, t.color());
 				}
-				if (t.header()) context.fill(x, y + 10, x + w, y + 11, 0xFF2E2E38);
+				if (t.header()) context.fill(x, y + 10, x + w, y + 11, Ui.CARD_BORDER);
 			}
 			case TimeRow s -> {
 				context.fill(x, y + 2, x + 4, y + 6, s.color());

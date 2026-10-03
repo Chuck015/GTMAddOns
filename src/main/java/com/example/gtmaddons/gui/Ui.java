@@ -15,8 +15,6 @@ final class Ui {
 	static final int OK = 0xFFFFDD55;
 	static final int BAD = 0xFFFF5555;
 
-	private static final int PANEL = 0xC0101016;
-	private static final int PANEL_BORDER = 0xFF2E2E38;
 	private static final int BAR_TRACK = 0xFF26262E;
 
 	/** Each PvP category's accent color, used for its tab, panel headers and bars. */
@@ -31,11 +29,11 @@ final class Ui {
 
 	/** A dark panel with a thin border and an accent strip along the top. */
 	static void panel(DrawContext context, int x, int y, int w, int h, int accent) {
-		context.fill(x, y, x + w, y + h, PANEL);
-		context.fill(x, y, x + w, y + 1, PANEL_BORDER);
-		context.fill(x, y + h - 1, x + w, y + h, PANEL_BORDER);
-		context.fill(x, y, x + 1, y + h, PANEL_BORDER);
-		context.fill(x + w - 1, y, x + w, y + h, PANEL_BORDER);
+		context.fill(x, y, x + w, y + h, CARD);
+		context.fill(x, y, x + w, y + 1, CARD_BORDER);
+		context.fill(x, y + h - 1, x + w, y + h, CARD_BORDER);
+		context.fill(x, y, x + 1, y + h, CARD_BORDER);
+		context.fill(x + w - 1, y, x + w, y + h, CARD_BORDER);
 		context.fill(x, y, x + w, y + 2, accent);
 	}
 
@@ -57,6 +55,46 @@ final class Ui {
 		return font.trimToWidth(text, Math.max(0, width - font.getWidth(dots))) + dots;
 	}
 
+	/**
+	 * Color for a rating score (0-100, 50 = the average player): red, through yellow at 50, to green. Ratings use
+	 * this everywhere (leaderboard, fight log, insight pages, the overview ring); rateColor is for percentages.
+	 */
+	static int scoreColor(double score) {
+		return gradient(score / 100.0);
+	}
+
+	/**
+	 * What a typical player (the median of the players with data, 2026-10-02) gets in each PvP category: the share of
+	 * shots that hit, and the share of hits that are headshots. Hit rates are low in GTM; these set where yellow is.
+	 */
+	static double typicalHitRate(PvpCategory category) {
+		return switch (category) {
+			case GROUND -> 0.184;
+			case WING -> 0.166;
+			case AIR -> 0.110;
+			case JP -> 0.110;
+		};
+	}
+
+	static double typicalHeadshotShare(PvpCategory category) {
+		return switch (category) {
+			case GROUND -> 0.126;
+			case WING -> 0.106;
+			case AIR -> 0.166;
+			case JP -> 0.196;
+		};
+	}
+
+	/** Color for a value against what a typical player gets: red at 0, yellow at typical, green at twice typical. White with no data. */
+	static int relativeColor(double value, double typical) {
+		return Double.isNaN(value) || typical <= 0 ? TEXT : gradient(value / typical / 2.0);
+	}
+
+	/** Color for a swap time: green at the best time the ratings use, red at the worst. */
+	static int swapTimeColor(double ms, double bestMs, double worstMs) {
+		return scoreColor(Math.max(0.0, Math.min(100.0, 100.0 * (worstMs - ms) / (worstMs - bestMs))));
+	}
+
 	/** Green / yellow / red for a success-style percentage. */
 	static int rateColor(double percent) {
 		return percent >= 75 ? GOOD : percent >= 50 ? OK : BAD;
@@ -72,14 +110,18 @@ final class Ui {
 	static final int BLUE = 0xFF3F7DF0;
 	static final int ORANGE = 0xFFF0A53F;
 
-	/** A flat dark card with a thin border, and its title in bold white caps. */
+	/** The accent the overview is drawing its cards in (0 = none); set by StatsOverview.draw. */
+	static int cardAccent = 0;
+
+	/** A flat dark card with a thin border, an accent strip along the top, and its title in bold caps in the accent. */
 	static void card(DrawContext context, TextRenderer font, int x, int y, int w, int h, String title) {
 		context.fill(x, y, x + w, y + h, CARD);
 		context.fill(x, y, x + w, y + 1, CARD_BORDER);
 		context.fill(x, y + h - 1, x + w, y + h, CARD_BORDER);
 		context.fill(x, y, x + 1, y + h, CARD_BORDER);
 		context.fill(x + w - 1, y, x + w, y + h, CARD_BORDER);
-		context.drawTextWithShadow(font, net.minecraft.text.Text.literal(title).formatted(net.minecraft.util.Formatting.BOLD), x + 6, y + 6, TEXT);
+		if (cardAccent != 0) context.fill(x, y, x + w, y + 2, cardAccent);
+		context.drawTextWithShadow(font, net.minecraft.text.Text.literal(title).formatted(net.minecraft.util.Formatting.BOLD), x + 6, y + 6, cardAccent != 0 ? cardAccent : TEXT);
 	}
 
 	/** Text drawn scale times bigger; x is its left edge, or its center if centered. */

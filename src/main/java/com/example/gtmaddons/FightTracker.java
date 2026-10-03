@@ -21,7 +21,9 @@ import java.util.regex.Pattern;
  * Stats are only recorded during fights. A fight starts when GTM's combat
  * tag starts (see CombatTracker) and ends with your kill or your death:
  *
- *   Kill:  "[GTM] You killed X! $X was dropped on the ground!"
+ *   Kill:  "[GTM] You killed X! $X was dropped on the ground!", or arresting X in cop mode
+ *          ("[COP MODE] X was arrested by <you>!"). Being arrested ("[COP MODE] <you> was
+ *          arrested by Y!") is a death.
  *   Death: GTM's "WASTED" title (shown only when you die; the subtitle
  *          names the killer) - the main signal, since GTM has many death
  *          messages ("baked like a potato", "a preview of hell"...). Also
@@ -43,6 +45,19 @@ public final class FightTracker {
 	public static final FightTracker INSTANCE = new FightTracker();
 
 	private static final Pattern KILL = Pattern.compile("\\[GTM\\]\\s*You killed ([A-Za-z0-9_]{1,16})!", Pattern.CASE_INSENSITIVE);
+	/** Cop mode: "[COP MODE] X was arrested by Y!" - a kill for Y and a death for X. */
+	private static final Pattern ARREST = Pattern.compile(
+			"\\[COP MODE\\]\\s*([A-Za-z0-9_]{1,16}) was arrested by ([A-Za-z0-9_]{1,16})!", Pattern.CASE_INSENSITIVE);
+
+	/** Who was arrested and by whom. */
+	public record Arrest(String victim, String cop) {}
+
+	/** The arrest a chat message announces, or null if it is not one. */
+	public static Arrest parseArrest(String message) {
+		Matcher m = ARREST.matcher(message);
+		return m.find() ? new Arrest(m.group(1), m.group(2)) : null;
+	}
+
 	/** Death messages naming a killer, after your name. */
 	private static final String DEATH_BY = " (?:was killed by|was murdered by|was shanked by|got \\w+ ass kicked by) ([A-Za-z0-9_]{1,16})";
 	/** The title GTM shows when you die - and only then (our dev log, 14 of 14). */
@@ -199,6 +214,22 @@ public final class FightTracker {
 			return;
 		}
 
+		// Cop mode: you arrested someone (a kill) or were arrested (a death).
+		Arrest arrest = parseArrest(message);
+		if (arrest != null) {
+			String me = myName();
+			if (me != null && arrest.cop().equalsIgnoreCase(me)) {
+				end("KILL", arrest.victim());
+				// Still tagged, so still fighting: that's the next fight.
+				if (CombatTracker.INSTANCE.isTagged()) start();
+				return;
+			}
+			if (me != null && arrest.victim().equalsIgnoreCase(me)) {
+				end("DEATH", arrest.cop());
+				return;
+			}
+		}
+
 		String name = myName();
 		if (name != null) {
 			String me = "(?:^|[^A-Za-z0-9_])" + Pattern.quote(name);
@@ -249,7 +280,7 @@ public final class FightTracker {
 		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Fight dropped, nothing recorded: " + reason, Formatting.GRAY);
 	}
 
-	private static String myName() {
+	static String myName() {
 		MinecraftClient client = MinecraftClient.getInstance();
 		if (client.player != null) return client.player.getName().getString();
 		return client.getSession() != null ? client.getSession().getUsername() : null;

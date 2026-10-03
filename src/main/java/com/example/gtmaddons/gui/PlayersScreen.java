@@ -301,6 +301,8 @@ public class PlayersScreen extends Screen {
 
 	@Override
 	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
+		// The same dark page as the other stats screens.
+		context.fill(0, 0, width, height, Ui.PAGE);
 		int left = (width - rowWidth()) / 2;
 		int perPage = rowsPerPage();
 		int start = page * perPage, end = Math.min(entries.size(), start + perPage);
@@ -355,7 +357,7 @@ public class PlayersScreen extends Screen {
 
 	private void rating(DrawContext context, Double value, int right, int y) {
 		if (value == null) Ui.textRight(context, textRenderer, "-", right, y, Ui.MUTED);
-		else Ui.textRight(context, textRenderer, String.valueOf(Math.round(value)), right, y, Ui.rateColor(value));
+		else Ui.textRight(context, textRenderer, String.valueOf(Math.round(value)), right, y, Ui.scoreColor(value));
 	}
 
 	/** "Last 25 fights  ·  12 players  ·  page 1 of 2", or the filter in words. */

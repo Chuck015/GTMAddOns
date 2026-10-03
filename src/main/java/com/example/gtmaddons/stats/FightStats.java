@@ -192,11 +192,11 @@ public final class FightStats {
 
 	// ---- Ratings for the fight log ----
 
-	/** The ratings for this fight alone, in the PvP category it was fought in (null category: none). */
+	/** The ratings for this fight alone, in the PvP category it was fought in (null category: none). Always complete: see Ratings.computeForFight. */
 	public static Ratings.Result ratingsForFight(FightHistory history, FightData fight) {
 		PvpCategory category = PvpCategory.fromName(fight.category());
 		if (category == null) return null;
-		return Ratings.compute(detail(history, List.of(fight)), category);
+		return Ratings.computeForFight(detail(history, List.of(fight)), category);
 	}
 
 	/**
@@ -207,7 +207,7 @@ public final class FightStats {
 	public static Ratings.Result runningRatings(FightHistory history, List<FightData> all, int index, int window) {
 		PvpCategory category = PvpCategory.fromName(all.get(index).category());
 		if (category == null) return null;
-		return Ratings.compute(detail(history, trailing(all, index, window)), category);
+		return Ratings.computeForFight(detail(history, trailing(all, index, window)), category);
 	}
 
 	/** This fight and the `window - 1` fights before it in the same PvP category (newest first). */

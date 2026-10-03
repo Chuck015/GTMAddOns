@@ -94,6 +94,13 @@ public final class CombatTracker {
 	}
 
 	public void onMessage(Text text) {
+		// Cop mode: being arrested ends the fight and the tag, like dying. Arresting someone changes nothing for you.
+		FightTracker.Arrest arrest = FightTracker.parseArrest(text.getString());
+		if (arrest != null) {
+			String me = FightTracker.myName();
+			if (me != null && arrest.victim().equalsIgnoreCase(me)) end("arrested by " + arrest.cop());
+			return;
+		}
 		String message = text.getString().toLowerCase(Locale.ROOT);
 		if (isDeathMessage(message)) {
 			end("death message");

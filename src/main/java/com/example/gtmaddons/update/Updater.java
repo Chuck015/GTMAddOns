@@ -25,6 +25,10 @@ import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Keeps the mod up to date from the GitHub releases of Chuck015/GTMAddOns.
@@ -69,6 +73,15 @@ public final class Updater {
 	private String assetUrl, assetName, assetSha256;
 	private Path pending;
 	private boolean installScheduled;
+	/** GitHub's ETag for the release list: a repeat check with it costs nothing when nothing changed (HTTP 304). */
+	private String etag;
+	/** The version the player was last told about, so a re-check doesn't repeat the message. */
+	private String notifiedVersion;
+	private volatile long lastCheckNanos = 0L;
+	private ScheduledExecutorService scheduler;
+	/** While the game runs: how often to look again, and the shortest gap when /gao is opened. */
+	private static final long RECHECK_MINUTES = 30, RECHECK_JITTER_MINUTES = 8;
+	private static final long OPEN_RECHECK_NANOS = 5L * 60 * 1_000_000_000L;
 
 	private Updater() {}
 
@@ -111,7 +124,47 @@ public final class Updater {
 				check();
 			} catch (Throwable t) {
 				LOGGER.warn("GTMAddOns: update check failed: {}", t.toString());
-				state = State.FAILED;
+				if (state == State.IDLE || state == State.CHECKING) state = State.FAILED;
+			}
+			scheduleRecheck();
+		}, "GTMAddOns updater");
+		thread.setDaemon(true);
+		thread.start();
+	}
+
+	/**
+	 * A game left open for hours would never hear about a release made after it started, so look
+	 * again every half hour or so (a little random, so players don't all ask at the same moment).
+	 */
+	private synchronized void scheduleRecheck() {
+		if (scheduler == null) {
+			scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+				Thread t = new Thread(r, "GTMAddOns updater");
+				t.setDaemon(true);
+				return t;
+			});
+		}
+		long minutes = RECHECK_MINUTES + ThreadLocalRandom.current().nextLong(-RECHECK_JITTER_MINUTES, RECHECK_JITTER_MINUTES + 1);
+		scheduler.schedule(() -> {
+			try {
+				check();
+			} catch (Throwable t) {
+				LOGGER.info("GTMAddOns: update re-check failed: {}", t.toString());
+			}
+			scheduleRecheck();
+		}, minutes, TimeUnit.MINUTES);
+	}
+
+	/** Opening the /gao menu: look again if the last check was a while ago (never while downloading or ready). */
+	public void recheckSoon() {
+		if (state == State.DOWNLOADING || state == State.READY || state == State.IDLE || state == State.CHECKING) return;
+		if (System.nanoTime() - lastCheckNanos < OPEN_RECHECK_NANOS) return;
+		lastCheckNanos = System.nanoTime();
+		Thread thread = new Thread(() -> {
+			try {
+				check();
+			} catch (Throwable t) {
+				LOGGER.info("GTMAddOns: update re-check failed: {}", t.toString());
 			}
 		}, "GTMAddOns updater");
 		thread.setDaemon(true);
@@ -142,18 +195,23 @@ public final class Updater {
 	}
 
 	private void check() throws Exception {
-		if (state == State.READY) return;
-		state = State.CHECKING;
-		HttpResponse<String> response = http.send(HttpRequest.newBuilder(URI.create(RELEASES))
+		if (state == State.READY || state == State.DOWNLOADING) return;
+		lastCheckNanos = System.nanoTime();
+		// The first check shows "checking"; later ones leave the state alone so the Update button doesn't flicker.
+		if (state == State.IDLE) state = State.CHECKING;
+		HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(RELEASES))
 				.timeout(Duration.ofSeconds(15))
 				.header("Accept", "application/vnd.github+json")
-				.header("User-Agent", "GTMAddOns/" + modVersion())
-				.GET().build(), HttpResponse.BodyHandlers.ofString());
+				.header("User-Agent", "GTMAddOns/" + modVersion());
+		if (etag != null) request.header("If-None-Match", etag);
+		HttpResponse<String> response = http.send(request.GET().build(), HttpResponse.BodyHandlers.ofString());
+		if (response.statusCode() == 304) return; // nothing changed since the last look
 		if (response.statusCode() != 200) {
 			LOGGER.info("GTMAddOns: no release info (HTTP {})", response.statusCode());
-			state = State.FAILED;
+			if (state == State.CHECKING) state = State.FAILED;
 			return;
 		}
+		etag = response.headers().firstValue("ETag").orElse(null);
 		// The releases are one per Minecraft version (tag = the version), so look through them all
 		// and take the highest version that has a jar for this game. A jar is ours if its name starts
 		// with gtmaddons-<minecraft version>- , or it is in the release tagged with that version.
@@ -191,7 +249,8 @@ public final class Updater {
 		}
 		if (bestBody.contains(AUTO_MARKER) || required) {
 			download();
-		} else {
+		} else if (!bestVersion.equals(notifiedVersion)) {
+			notifiedVersion = bestVersion;
 			notice = "GTMAddOns " + bestVersion + " is out (you have " + modVersion() + "). Run /gao update or click Update in /gao.";
 		}
 	}

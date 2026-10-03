@@ -1,5 +1,7 @@
 package com.example.gtmaddons;
 
+import net.minecraft.client.gui.widget.ButtonWidget;
+import net.fabricmc.fabric.api.client.screen.v1.Screens;
 import com.example.gtmaddons.update.Updater;
 import com.example.gtmaddons.gui.PlayersScreen;
 import com.example.gtmaddons.gui.Format;
@@ -110,6 +112,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 
 	// Display state
 	private boolean swapInProgress = false;
+	/** The swap recording button was used during this swap: it counts as canceled. */
+	private boolean swapCanceledByButton = false;
 	private long openTimeNanos = 0L;
 	// Last completed swap, shown in the corner for RESULT_DISPLAY_MS
 	private double lastDurationSeconds = -1;
@@ -160,6 +164,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		Updater.INSTANCE.start();
+		ModUsers.init(stats, settings);
+		stats.setShowUsers(settings.showModUsers);
 		HudRenderCallback.EVENT.register(this::onHudRender);
 		ClientCommandRegistrationCallback.EVENT.register(this::registerCommands);
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> stats.flushBlocking(3000));
@@ -224,6 +230,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 
 		ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
 			CombatTracker.INSTANCE.onScreenOpened(screen);
+			if (settings.swapRecordButton && screen instanceof InventoryScreen) addSwapRecordButton(screen);
 			// AFTER_INIT also fires when the open screen is resized. Fabric
 			// clears the screen's listeners then, so re-register them, but
 			// don't restart a swap that's already in progress.
@@ -237,6 +244,48 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		});
 	}
 
+	/** The Start / Stop swap recording button to the right of the inventory; follows the inventory when it moves (recipe book). */
+	private void addSwapRecordButton(Screen screen) {
+		HandledScreenAccessor accessor = (HandledScreenAccessor) screen;
+		ButtonWidget button = ButtonWidget.builder(swapRecordLabel(), b -> {
+			toggleSwapRecording();
+			b.setMessage(swapRecordLabel());
+		}).dimensions(accessor.gtmaddons$getX() + INVENTORY_WIDTH + 4, accessor.gtmaddons$getY(), 92, 20).build();
+		Screens.getButtons(screen).add(button);
+		ScreenEvents.beforeRender(screen).register((s, drawContext, mouseX, mouseY, tickDelta) -> {
+			button.setX(accessor.gtmaddons$getX() + INVENTORY_WIDTH + 4);
+			button.setY(accessor.gtmaddons$getY());
+			button.setMessage(swapRecordLabel());
+		});
+	}
+
+	private static final int INVENTORY_WIDTH = 176;
+
+	private Text swapRecordLabel() {
+		return Text.literal(SwapSession.INSTANCE.isRecording() ? "Stop recording" : "Start recording");
+	}
+
+	/** Same as /gao swapinfo start and end. */
+	private void toggleSwapRecording() {
+		if (swapInProgress) swapCanceledByButton = true;
+		if (!SwapSession.INSTANCE.isRecording()) {
+			SwapSession.INSTANCE.sendStarted(SwapSession.INSTANCE.start());
+			return;
+		}
+		// A swap still having its momentum measured counts too.
+		finishMomentum();
+		SwapSession.INSTANCE.end();
+	}
+
+	public boolean isSwapRecordButtonOn() {
+		return settings.swapRecordButton;
+	}
+
+	public void setSwapRecordButtonOn(boolean on) {
+		settings.swapRecordButton = on;
+		settings.save();
+	}
+
 	private boolean isTrackedInventoryScreen(Screen screen) {
 		return screen instanceof InventoryScreen || screen instanceof CreativeInventoryScreen;
 	}
@@ -248,7 +297,28 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			dispatcher.register(literal(name).then(literal("update").executes(ctx -> {
 				Updater.INSTANCE.requestUpdate();
 				return 1;
-			})).executes(ctx -> {
+			})).then(literal("help").executes(ctx -> {
+				CommandHelp.send();
+				return 1;
+			})).then(literal("swapinfo")
+					.then(literal("start").executes(ctx -> {
+						SwapSession.INSTANCE.sendStarted(SwapSession.INSTANCE.start());
+						return 1;
+					}))
+					.then(literal("end").executes(ctx -> {
+						if (!SwapSession.INSTANCE.isRecording()) {
+							SwapSession.INSTANCE.sendNotRecording();
+						} else {
+							// A swap still having its momentum measured counts too.
+							finishMomentum();
+							SwapSession.INSTANCE.end();
+						}
+						return 1;
+					}))
+					.executes(ctx -> {
+						SwapSession.INSTANCE.sendStatus();
+						return 1;
+					})).executes(ctx -> {
 				openMainScreen();
 				return 1;
 			}));
@@ -329,6 +399,16 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	public void setBoostAngleOn(boolean on) {
 		settings.boostAngle = on;
 		settings.save();
+	}
+
+	public boolean isModIconsOn() {
+		return settings.showModUsers;
+	}
+
+	public void setModIconsOn(boolean on) {
+		settings.showModUsers = on;
+		settings.save();
+		stats.setShowUsers(on);
 	}
 
 	public boolean isBetterNearOn() {
@@ -576,6 +656,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		if (targetIndex < 0) return false;
 
 		swapInProgress = true;
+		swapCanceledByButton = false;
 		arrivalNanos = -1L;
 		wingsuitInventoryIndex = targetIndex;
 		swapCategory = category;
@@ -669,9 +750,14 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		swapInProgress = false;
 
 		double totalSeconds = (closeNanos - openTimeNanos) / 1_000_000_000.0;
+		boolean canceledByButton = swapCanceledByButton;
+		swapCanceledByButton = false;
+		if (canceledByButton) arrivalNanos = -1L;
 
 		SwapType type = null;
-		if (airSwap) {
+		if (canceledByButton) {
+			// no type: the swap didn't finish
+		} else if (airSwap) {
 			type = client.player != null ? airSwapType(client.player.getInventory()) : null;
 			if (type == null) arrivalNanos = -1L;
 		} else if (arrivalNanos >= 0) {
@@ -681,7 +767,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		SwapResult result;
 		if (arrivalNanos >= 0) {
 			result = SwapResult.SUCCESS;
-		} else if (client.player != null && inventoryChanged(client.player.getInventory())) {
+		} else if (canceledByButton || (client.player != null && inventoryChanged(client.player.getInventory()))) {
 			result = SwapResult.CANCELED;
 		} else {
 			result = SwapResult.FAILED;
@@ -721,6 +807,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	/** Hands a finished swap to the fight (only kept if it ends in a kill or death) and the debug report. */
 	private void recordSwap(SwapRecord record) {
 		FightTracker.INSTANCE.addSwap(record);
+		SwapSession.INSTANCE.add(record);
 		if (settings.swapDebug) {
 			sendDebugReport(record);
 		}
@@ -758,6 +845,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		SwapRecord done = record.withSpeedAfterBps(elapsed > 0 ? momentumSum / elapsed : momentumLastBps);
 		// Only the fight it was made in - not one that started during the window.
 		if (momentumInFight) FightTracker.INSTANCE.addSwap(done);
+		SwapSession.INSTANCE.add(done);
 		if (settings.swapDebug) {
 			sendDebugReport(done);
 		}
@@ -795,48 +883,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	}
 
 	private void sendDebugReport(SwapRecord r) {
-		String slotName = wingsuitInventoryIndex == CHEST_INVENTORY_INDEX ? "chest slot" : "wingsuit slot";
-
-		sendChat("---- Advanced Swap Info: " + switch (SwapResult.valueOf(r.result())) {
-			case SUCCESS -> "Success";
-			case FAILED -> "Failed";
-			case CANCELED -> "Canceled";
-		} + " ----");
-
-		sendChat("PvP: " + PvpCategory.valueOf(r.category()).label
-				+ (r.swapType() != null ? "  |  " + SwapType.valueOf(r.swapType()).label : ""));
-		sendChat("Reach " + slotName + ": " + seconds(r.reachMs()));
-		sendChat(capitalize(slotName) + " -> hotbar: " + seconds(r.slotToHotbarMs()));
-		sendChat("Hotbar -> close: " + seconds(r.hotbarToCloseMs()));
-		sendChat((airSwap ? "Swap made: " : "Wing to hotbar: ") + seconds(r.wingToHotbarMs()));
-		sendChat("Total swap: " + seconds(r.totalMs()));
-		if (r.speedBeforeBps() != null) {
-			sendChat(String.format("Momentum: %.1f b/s before, %.1f b/s after (2s average, %.0f%% kept)", r.speedBeforeBps(), r.speedAfterBps(),
-					r.speedBeforeBps() > 0 ? r.speedAfterBps() / r.speedBeforeBps() * 100 : 100.0));
-		}
-
-		sendChat(String.format("Mouse moved: %.1f°", r.mouseDeg()));
-		if (r.approachDeg() == null) {
-			sendChat("(" + slotName + " wasn't on screen - no movement breakdown)");
-			return;
-		}
-		// Efficiency = needed / (needed + sideways + 2 x backward + after-touch), so
-		// everything counted against you is what's left of it (see SwapDebugTracker).
-		double touched = r.overflickDeg() != null ? r.overflickDeg() : 0.0;
-		double extra = r.efficiency() > 0 ? r.neededDeg() * (100.0 / r.efficiency() - 1.0) : 0.0;
-		double sideways = Math.max(0.0, extra - 2.0 * r.awayDeg() - touched);
-		sendChat(String.format("Efficiency: %.0f%% (%.1f° needed, %.1f° of extra movement counted against you)",
-				r.efficiency(), r.neededDeg(), extra));
-		sendChat(String.format("Approach: %.1f° moved, %.1f° needed", r.approachDeg(), r.neededDeg()));
-		sendChat(String.format("Sideways off the straight line: %.1f°", sideways));
-		sendChat(String.format("Backward, away from the slot: %.1f° (counts twice)", r.awayDeg()));
-		if (r.overflickDeg() != null) {
-			sendChat(String.format("Movement after touching the slot: %.1f° (peak %.1f° past it)",
-					r.overflickDeg(), r.overflickPeakDeg()));
-		}
-		if (r.afterDeg() != null) {
-			sendChat(String.format("Unneeded after wing in hotbar: %.1f° (not part of efficiency)", r.afterDeg()));
-		}
+		SwapSession.sendSwapReport(r, airSwap, wingsuitInventoryIndex == CHEST_INVENTORY_INDEX,
+				r.swapType() != null ? SwapType.valueOf(r.swapType()).label : null);
 	}
 
 	/**
@@ -873,14 +921,6 @@ public class GTMAddOnsClient implements ClientModInitializer {
 
 	private static double millis(long nanos) {
 		return nanos / 1_000_000.0;
-	}
-
-	private static String seconds(Double ms) {
-		return ms == null ? "n/a" : String.format("%.3fs", ms / 1000.0);
-	}
-
-	private static String capitalize(String s) {
-		return Character.toUpperCase(s.charAt(0)) + s.substring(1);
 	}
 
 	private static boolean isWingsuit(ItemStack stack) {
@@ -951,13 +991,6 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		if (settings.cornerSwapText && lastDurationSeconds >= 0 && nowMillis - lastSwapMillis < RESULT_DISPLAY_MS) {
 			HudLayout.draw(drawContext, font, HudLayout.Element.LAST_SWAP,
 					Text.literal(String.format("Last Swap: %.3fs", lastDurationSeconds)));
-		}
-	}
-
-	private void sendChat(String msg) {
-		MinecraftClient client = MinecraftClient.getInstance();
-		if (client.player != null) {
-			client.player.sendMessage(Text.literal(msg).formatted(Formatting.AQUA), false);
 		}
 	}
 }

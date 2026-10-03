@@ -91,6 +91,7 @@ public final class StatsClient {
 			return;
 		}
 		worker.scheduleWithFixedDelay(this::flush, FLUSH_INTERVAL_SECONDS, FLUSH_INTERVAL_SECONDS, TimeUnit.SECONDS);
+		worker.scheduleWithFixedDelay(this::presenceTick, 20, 30, TimeUnit.SECONDS);
 	}
 
 	/**
@@ -115,10 +116,6 @@ public final class StatsClient {
 		} catch (Exception e) {
 			LOGGER.warn("GTMAddOns: final stats upload didn't finish: {}", e.toString());
 		}
-	}
-
-	public CompletableFuture<PlayerStats.PlayerList> fetchPlayers() {
-		return get("/players", PlayerStats.PlayerList.class);
 	}
 
 	/** One player's stats over their last `fights` fights (25, 50 or 100) of one PvP category. */
@@ -320,6 +317,51 @@ public final class StatsClient {
 		}
 	}
 
+	// ---- Who runs the mod (the icon next to their name, see ModUsers) ----
+
+	/** How often to tell the backend this player is running the mod, and how often to ask who else is. */
+	private static final long HEARTBEAT_MS = 15 * 60_000L, USERS_REFRESH_MS = 5 * 60_000L;
+	private volatile java.util.Set<String> modUsers = java.util.Set.of();
+	private volatile boolean showUsers = true;
+	private volatile UUID ownAccount;
+	private long lastHeartbeatMillis = 0L, lastUsersMillis = 0L;
+
+	/** Off: the list of users is not fetched (the heartbeat is still sent, so others can see you). */
+	public void setShowUsers(boolean on) {
+		showUsers = on;
+	}
+
+	/** Whether this player runs the mod: you always do; others once the backend lists them. */
+	public boolean isModUser(UUID uuid) {
+		return uuid.equals(ownAccount) || modUsers.contains(uuid.toString().replace("-", ""));
+	}
+
+	/** Every 30 seconds on the stats thread: send the heartbeat and refresh the list when they are due. */
+	private void presenceTick() {
+		try {
+			UUID account = currentAccount();
+			ownAccount = account;
+			if (account == null) return;
+			long now = System.currentTimeMillis();
+			if (now - lastHeartbeatMillis >= HEARTBEAT_MS) {
+				if (authedRequest(account, "POST", "/presence", "{}").statusCode() == 200) lastHeartbeatMillis = now;
+			}
+			if (showUsers && now - lastUsersMillis >= USERS_REFRESH_MS) {
+				HttpResponse<String> response = authedRequest(account, "GET", "/users", null);
+				if (response.statusCode() == 200) {
+					java.util.Set<String> users = new java.util.HashSet<>();
+					for (com.google.gson.JsonElement id : com.google.gson.JsonParser.parseString(response.body()).getAsJsonObject().getAsJsonArray("uuids")) {
+						users.add(id.getAsString());
+					}
+					modUsers = users;
+					lastUsersMillis = now;
+				}
+			}
+		} catch (Exception e) {
+			LOGGER.debug("GTMAddOns: presence update failed: {}", e.toString());
+		}
+	}
+
 	private HttpResponse<String> authedRequest(UUID account, String method, String path, String jsonBody) throws Exception {
 		ensureLoggedIn(account);
 		HttpResponse<String> response = send(method, path, jsonBody, token);
@@ -359,7 +401,7 @@ public final class StatsClient {
 		if (!uuid.equals(session.getUuidOrNull())) throw new IOException("account changed while logging in");
 
 		PlayerKeyPair keyPair = client.getProfileKeys().fetchKeyPair().get(15, TimeUnit.SECONDS)
-				.orElseThrow(() -> new IOException("no Mojang profile key for this account (needs an online Minecraft account)"));
+				.orElseThrow(() -> new IOException(explainMissingKey(session)));
 		PlayerPublicKey.PublicKeyData keyData = keyPair.publicKey().data();
 
 		HttpResponse<String> challenge = send("POST", "/auth/challenge", "{}", null);
@@ -383,6 +425,40 @@ public final class StatsClient {
 		HttpResponse<String> login = send("POST", "/auth/login", body.toString(), null);
 		if (login.statusCode() != 200) throw new IOException("login failed: HTTP " + login.statusCode() + " " + login.body());
 		return GSON.fromJson(login.body(), JsonObject.class).get("token").getAsString();
+	}
+
+	/**
+	 * The game had no profile key for this account. Ask Mojang's certificate service the same question the game does
+	 * and say what its answer means, so the player knows what to fix. Short on purpose: it is shown in one line on the
+	 * stats screens (the same text is written to the game log).
+	 */
+	private String explainMissingKey(Session session) {
+		String advice;
+		try {
+			String accessToken = session.getAccessToken();
+			if (accessToken == null || accessToken.length() < 20) {
+				advice = "This looks like an offline account - the stats need a real Microsoft Minecraft account";
+			} else {
+				HttpResponse<String> response = http.send(HttpRequest.newBuilder(URI.create("https://api.minecraftservices.com/player/certificates"))
+						.timeout(Duration.ofSeconds(10))
+						.header("Authorization", "Bearer " + accessToken)
+						.POST(HttpRequest.BodyPublishers.noBody())
+						.build(), HttpResponse.BodyHandlers.ofString());
+				advice = switch (response.statusCode()) {
+					case 200 -> "Mojang has a key for you but the game didn't load it - restart Lunar, then delete the 'profilekeys' folder if it persists";
+					case 401 -> "Your Minecraft login expired - log out and back in to your account in Lunar, then try again";
+					case 403 -> "Mojang won't give this account a chat key - check Xbox privacy settings (multiplayer and chat allowed)";
+					case 429 -> "Mojang is limiting key requests right now - wait a few minutes and try again";
+					default -> "Mojang's key service answered HTTP " + response.statusCode() + " - try again later";
+				};
+				LOGGER.warn("GTMAddOns: no profile key; Mojang's certificate service answered HTTP {}", response.statusCode());
+			}
+		} catch (java.io.IOException | InterruptedException e) {
+			if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+			advice = "Can't reach Mojang's key service - a VPN, firewall or antivirus may be blocking it";
+			LOGGER.warn("GTMAddOns: no profile key; couldn't reach Mojang's certificate service: {}", e.toString());
+		}
+		return advice;
 	}
 
 	/** What gets signed to log in. Must match loginMessage in the backend. */

@@ -8,6 +8,8 @@
     "InGameHudMixin",
     "LivingEntityInvoker",
     "MinecraftClientMixin",
+    "NameTagMixin",
+    "PlayerListHudMixin",
     "SoundSystemMixin"
   ],
   "injectors": {

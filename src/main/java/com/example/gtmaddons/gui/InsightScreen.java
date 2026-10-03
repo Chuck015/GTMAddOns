@@ -242,7 +242,7 @@ public class InsightScreen extends Screen {
 
 	private static Row ratingRow(String name, Double value) {
 		if (value == null) return new Stat(name, "not enough data", Ui.MUTED);
-		return new Meter(name, String.format("%.0f", value), Ui.rateColor(value), value / 100);
+		return new Meter(name, String.format("%.0f", value), Ui.scoreColor(value), value / 100);
 	}
 
 	/** K/D and fights won, then the last few fights: streaks, fight lengths, opponents and a timeline. */
@@ -543,7 +543,7 @@ public class InsightScreen extends Screen {
 			} else {
 				double score = Math.max(0, Math.min(100, 100.0 * (s.avgBps() - RatingWeights.MOVEMENT_FLOOR_BPS)
 						/ (RatingWeights.MOVEMENT_CEILING_BPS - RatingWeights.MOVEMENT_FLOOR_BPS)));
-				rows.add(new Meter("Score", String.format("%.0f", score), Ui.rateColor(score), score / 100));
+				rows.add(new Meter("Score", String.format("%.0f", score), Ui.scoreColor(score), score / 100));
 				rows.add(new Stat("Average", Format.bps(s.avgBps()), Ui.TEXT));
 				rows.add(new Stat("Fastest", Format.bps(s.bestBps()), Ui.GOOD));
 				if (s.bestBps() != null) rows.add(new Stat("Fastest over average", "+" + Format.bps(s.bestBps() - s.avgBps()), Ui.TEXT));
@@ -576,9 +576,9 @@ public class InsightScreen extends Screen {
 		Ratings.Result r = Ratings.compute(detail, category);
 		all.add(ratingRow(Ratings.aimLabel(category) + " rating", r.aim()));
 		double hitRate = shots > 0 ? hits * 100.0 / shots : 0;
-		all.add(new Meter("Hit rate", String.format("%.0f%%", hitRate), Ui.accent(category), hitRate / 100));
+		all.add(new Meter("Hit rate", String.format("%.0f%%", hitRate), Ui.relativeColor(hitRate / 100, Ui.typicalHitRate(category)), hitRate / 100));
 		double hsRate = hits > 0 ? headshots * 100.0 / hits : 0;
-		all.add(new Meter("Headshots, of hits", String.format("%.0f%%", hsRate), Ui.accent(category), hsRate / 100));
+		all.add(new Meter("Headshots, of hits", String.format("%.0f%%", hsRate), Ui.relativeColor(hsRate / 100, Ui.typicalHeadshotShare(category)), hsRate / 100));
 		all.add(new Stat("Shots · hits · headshots", shots + " · " + hits + " · " + headshots, Ui.TEXT));
 		all.add(new Stat("Kills", String.valueOf(kills), Ui.TEXT));
 		all.add(new Stat("Shots per kill", kills > 0 ? String.format("%.1f", (double) shots / kills) : "-", Ui.TEXT));

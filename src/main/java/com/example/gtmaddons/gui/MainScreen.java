@@ -37,6 +37,7 @@ public class MainScreen extends Screen {
 
 	@Override
 	protected void init() {
+		Updater.INSTANCE.recheckSoon();
 		int x = width / 2 - BUTTON_WIDTH / 2;
 		int top = height / 2 - 44;
 
@@ -94,7 +95,7 @@ public class MainScreen extends Screen {
 
 		String line = mod.isInCombat() ? "In combat - stats are locked" : status;
 		if (line != null) {
-			context.drawCenteredTextWithShadow(textRenderer, Text.literal(line), width / 2, top + 72, 0xFFFFFF55);
+			context.drawCenteredTextWithShadow(textRenderer, Text.literal(Ui.fit(textRenderer, line, width - 16)), width / 2, top + 72, 0xFFFFFF55);
 		}
 	}
 }

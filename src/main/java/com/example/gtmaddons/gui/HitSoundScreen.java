@@ -2,6 +2,7 @@ package com.example.gtmaddons.gui;
 
 import com.example.gtmaddons.GTMAddOnsClient;
 import com.example.gtmaddons.HitSounds;
+import com.example.gtmaddons.HitSounds.Kind;
 import com.example.gtmaddons.Settings;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
@@ -12,18 +13,17 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 
 /**
- * Settings > Hit sound: turn the sound on, pick which one plays (with volume
- * and pitch), and choose which hits play it - headshots, body shots, melee -
- * each on its own, or all at once with All. Every change is saved as it's
- * made. Picking a sound, or clicking its name, plays it so you can hear it.
+ * Settings > Hit sound: turn hit sounds on, then pick a sound for each kind of hit - headshot, body
+ * shot and melee. Each kind has its own tab with its own on/off switch, sound, volume and pitch, so a
+ * headshot can play a different sound from a body shot. Every change is saved as it's made; picking a
+ * sound, or clicking its name, plays it so you can hear it.
  *
  *            [ Hit sound: ON ]
+ *            [Headshot] [Body shot] [Melee]
+ *            [ Headshot sound: ON ]
  *            [<] [   Ding   ] [>]
  *            [ Volume: 100%  ]
  *            [ Pitch: 1.00   ]
- *              Play the sound on:
- *            [ Headshot ] [ Body shot ]
- *            [  Melee   ] [ All hits  ]
  *            [    Back    ]
  */
 public class HitSoundScreen extends Screen {
@@ -32,9 +32,10 @@ public class HitSoundScreen extends Screen {
 	private static final int BUTTON_WIDTH = 200;
 	private static final int ARROW_WIDTH = 20;
 	private static final int GAP = 4;
-	/** The "Play the sound on:" caption between the sliders and the filters. */
-	private static final int CAPTION = 12;
 	private static final float PITCH_MIN = 0.5f, PITCH_MAX = 2.0f;
+
+	/** The tab last open, so coming back to the screen shows the same one. */
+	private static Kind selected = Kind.HEADSHOT;
 
 	private final Screen parent;
 	private final Settings settings;
@@ -46,7 +47,7 @@ public class HitSoundScreen extends Screen {
 	}
 
 	private int contentHeight() {
-		return ROW * 7 + CAPTION;
+		return ROW * 7;
 	}
 
 	private int top() {
@@ -57,7 +58,7 @@ public class HitSoundScreen extends Screen {
 	protected void init() {
 		int x = width / 2 - BUTTON_WIDTH / 2;
 		int y = top();
-		int half = (BUTTON_WIDTH - GAP) / 2;
+		int third = (BUTTON_WIDTH - 2 * GAP) / 3;
 
 		addDrawableChild(ButtonWidget.builder(onOff("Hit sound", settings.hitSound), b -> {
 			settings.hitSound = !settings.hitSound;
@@ -65,6 +66,25 @@ public class HitSoundScreen extends Screen {
 			b.setMessage(onOff("Hit sound", settings.hitSound));
 		}).dimensions(x, y, BUTTON_WIDTH, 20)
 				.build());
+		y += ROW;
+
+		// One tab per kind of hit; the open one is highlighted.
+		Kind[] kinds = Kind.values();
+		for (int i = 0; i < kinds.length; i++) {
+			Kind kind = kinds[i];
+			Text label = kind == selected ? Text.literal(kind.label).formatted(Formatting.YELLOW) : Text.literal(kind.label);
+			addDrawableChild(ButtonWidget.builder(label, b -> {
+				selected = kind;
+				clearAndInit();
+			}).dimensions(x + i * (third + GAP), y, third, 20).build());
+		}
+		y += ROW;
+
+		addDrawableChild(ButtonWidget.builder(onOff(selected.label + " sound", HitSounds.INSTANCE.enabledOf(selected)), b -> {
+			HitSounds.INSTANCE.setEnabled(selected, !HitSounds.INSTANCE.enabledOf(selected));
+			settings.save();
+			b.setMessage(onOff(selected.label + " sound", HitSounds.INSTANCE.enabledOf(selected)));
+		}).dimensions(x, y, BUTTON_WIDTH, 20).build());
 		y += ROW;
 
 		// Sound: previous, name (click to hear it), next.
@@ -80,57 +100,27 @@ public class HitSoundScreen extends Screen {
 		addDrawableChild(new VolumeSlider(x, y));
 		y += ROW;
 		addDrawableChild(new PitchSlider(x, y));
-		y += ROW + CAPTION;
-
-		addDrawableChild(filterButton(x, y, half, "Headshot",
-				() -> settings.hitSoundHeadshot, on -> settings.hitSoundHeadshot = on));
-		addDrawableChild(filterButton(x + BUTTON_WIDTH - half, y, half, "Body shot",
-				() -> settings.hitSoundBody, on -> settings.hitSoundBody = on));
-		y += ROW;
-		addDrawableChild(filterButton(x, y, half, "Melee",
-				() -> settings.hitSoundMelee, on -> settings.hitSoundMelee = on));
-		addDrawableChild(ButtonWidget.builder(onOff("All hits", allOn()), b -> {
-			boolean on = !allOn();
-			settings.hitSoundHeadshot = settings.hitSoundBody = settings.hitSoundMelee = on;
-			settings.save();
-			clearAndInit();
-		}).dimensions(x + BUTTON_WIDTH - half, y, half, 20)
-				.build());
 		y += ROW + 8;
 
 		addDrawableChild(ButtonWidget.builder(ScreenTexts.BACK, b -> close())
 				.dimensions(x, y, BUTTON_WIDTH, 20).build());
 	}
 
-	private boolean allOn() {
-		return settings.hitSoundHeadshot && settings.hitSoundBody && settings.hitSoundMelee;
-	}
-
-	/** One on/off button for a kind of hit; saves at once and refreshes the All button. */
-	private ButtonWidget filterButton(int x, int y, int w, String label,
-			java.util.function.BooleanSupplier get, java.util.function.Consumer<Boolean> set) {
-		return ButtonWidget.builder(onOff(label, get.getAsBoolean()), b -> {
-			set.accept(!get.getAsBoolean());
-			settings.save();
-			clearAndInit();
-		}).dimensions(x, y, w, 20).build();
-	}
-
 	private Text soundName() {
-		return Text.literal(HitSounds.CHOICES.get(HitSounds.INSTANCE.selectedIndex()).label());
+		return Text.literal(HitSounds.CHOICES.get(HitSounds.INSTANCE.selectedIndex(selected)).label());
 	}
 
 	private void stepSound(int delta) {
 		int n = HitSounds.CHOICES.size();
-		int next = (HitSounds.INSTANCE.selectedIndex() + delta + n) % n;
-		settings.hitSoundId = HitSounds.CHOICES.get(next).id();
+		int next = (HitSounds.INSTANCE.selectedIndex(selected) + delta + n) % n;
+		HitSounds.INSTANCE.setId(selected, HitSounds.CHOICES.get(next).id());
 		settings.save();
 		preview();
 		clearAndInit();
 	}
 
 	private void preview() {
-		HitSounds.play(settings.hitSoundId, settings.hitSoundVolume, settings.hitSoundPitch);
+		HitSounds.play(HitSounds.INSTANCE.idOf(selected), HitSounds.INSTANCE.volumeOf(selected), HitSounds.INSTANCE.pitchOf(selected));
 	}
 
 	private static Text onOff(String label, boolean on) {
@@ -147,13 +137,12 @@ public class HitSoundScreen extends Screen {
 		super.render(context, mouseX, mouseY, deltaTicks);
 		int top = top();
 		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, top - 22, Ui.TEXT);
-		context.drawCenteredTextWithShadow(textRenderer, Text.literal("Play on:"), width / 2, top + ROW * 4 + 2, Ui.LABEL);
 	}
 
-	/** 0-100% volume, saved as it's dragged. */
+	/** 0-100% volume for the open tab, saved as it's dragged. */
 	private final class VolumeSlider extends SliderWidget {
 		VolumeSlider(int x, int y) {
-			super(x, y, BUTTON_WIDTH, 20, Text.empty(), settings.hitSoundVolume);
+			super(x, y, BUTTON_WIDTH, 20, Text.empty(), HitSounds.INSTANCE.volumeOf(selected));
 			updateMessage();
 		}
 
@@ -165,15 +154,15 @@ public class HitSoundScreen extends Screen {
 
 		@Override
 		protected void applyValue() {
-			settings.hitSoundVolume = (float) value;
+			HitSounds.INSTANCE.setVolume(selected, (float) value);
 			settings.save();
 		}
 	}
 
-	/** Pitch 0.5-2.0, saved as it's dragged. */
+	/** Pitch 0.5-2.0 for the open tab, saved as it's dragged. */
 	private final class PitchSlider extends SliderWidget {
 		PitchSlider(int x, int y) {
-			super(x, y, BUTTON_WIDTH, 20, Text.empty(), (settings.hitSoundPitch - PITCH_MIN) / (PITCH_MAX - PITCH_MIN));
+			super(x, y, BUTTON_WIDTH, 20, Text.empty(), (HitSounds.INSTANCE.pitchOf(selected) - PITCH_MIN) / (PITCH_MAX - PITCH_MIN));
 			updateMessage();
 		}
 
@@ -188,7 +177,7 @@ public class HitSoundScreen extends Screen {
 
 		@Override
 		protected void applyValue() {
-			settings.hitSoundPitch = pitch();
+			HitSounds.INSTANCE.setPitch(selected, pitch());
 			settings.save();
 		}
 	}

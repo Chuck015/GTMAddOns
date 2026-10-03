@@ -42,12 +42,24 @@ public final class Settings {
 	public boolean boostHeight = true;
 	/** /near's reply as a sorted list, one player per line, in place of GTM's one long line (see NearList). */
 	public boolean betterNear = true;
+	/** An icon after the name of players who run GTMAddOns (tab list and nametags). */
+	public boolean showModUsers = true;
+
+	/** A Start / Stop recording button beside the inventory for the swap recording (SwapSession). */
+	public boolean swapRecordButton = false;
 	/** Hit sound: play a sound when you hit a player (see HitSounds). Off by default. */
 	public boolean hitSound = false;
 	/** The sound's vanilla id, its volume (0-1) and pitch (0.5-2). */
 	public String hitSoundId = "minecraft:entity.experience_orb.pickup";
 	public float hitSoundVolume = 1.0f;
 	public float hitSoundPitch = 1.0f;
+	/** The headshot and melee sounds' own choices; null / -1 = follow the body shot sound above (the only one that used to exist). */
+	public String hitSoundHeadshotId = null;
+	public float hitSoundHeadshotVolume = -1.0f;
+	public float hitSoundHeadshotPitch = -1.0f;
+	public String hitSoundMeleeId = null;
+	public float hitSoundMeleeVolume = -1.0f;
+	public float hitSoundMeleePitch = -1.0f;
 	/** Which hits play it: a headshot, a body shot (a gun hit that wasn't a headshot), a melee hit. */
 	public boolean hitSoundHeadshot = true;
 	public boolean hitSoundBody = true;

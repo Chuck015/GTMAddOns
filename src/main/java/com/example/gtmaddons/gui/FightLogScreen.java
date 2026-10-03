@@ -228,20 +228,27 @@ public class FightLogScreen extends Screen {
 				category != null ? Ui.accent(category) : Ui.MUTED);
 
 		Ratings.Result r = row.ratings();
-		rating(context, r != null ? r.aim() : null, x0 + 300, ty);
-		rating(context, r != null ? r.movement() : null, x0 + 338, ty);
-		rating(context, r != null ? r.overall() : null, x0 + 384, ty);
+		rating(context, r != null ? r.aim() : null, r != null && r.aimAssumed(), x0 + 300, ty);
+		rating(context, r != null ? r.movement() : null, r != null && r.movementAssumed(), x0 + 338, ty);
+		rating(context, r != null ? r.overall() : null, r != null && r.aimAssumed() && r.movementAssumed(), x0 + 384, ty);
 		if (AdminMode.isOn()) context.drawTextWithShadow(textRenderer, Text.literal("\u2716").formatted(Formatting.RED), x0 + TABLE_WIDTH + 4, ty, Ui.BAD);
 	}
 
-	private void rating(DrawContext context, Double value, int right, int y) {
+	/** assumed: no data for it in the fight, so it is shown as an estimate (dim, with a ~). */
+	private void rating(DrawContext context, Double value, boolean assumed, int right, int y) {
 		if (value == null) Ui.textRight(context, textRenderer, "-", right, y, Ui.MUTED);
-		else Ui.textRight(context, textRenderer, String.valueOf(Math.round(value)), right, y, Ui.rateColor(value));
+		else if (assumed) Ui.textRight(context, textRenderer, "~" + Math.round(value), right, y, Ui.MUTED);
+		else Ui.textRight(context, textRenderer, String.valueOf(Math.round(value)), right, y, Ui.scoreColor(value));
 	}
 
 	private static String length(FightData f) {
 		long seconds = Math.max(0, (f.endedAt() - f.startedAt()) / 1000);
 		return String.format("%d:%02d", seconds / 60, seconds % 60);
+	}
+
+	/** Says what a dim ~ rating means, for fights that have one. */
+	private static String assumedNote(Ratings.Result r) {
+		return r != null && (r.aimAssumed() || r.movementAssumed()) ? "  ·  ~ = no data, 50 assumed" : "";
 	}
 
 	/** One line under the table: about the hovered fight, or how many fights there are. */
@@ -253,7 +260,7 @@ public class FightLogScreen extends Screen {
 		int swaps = 0;
 		for (SwapRow s : f.swapRows()) if ("SUCCESS".equals(s.result())) swaps++;
 		return (f.won() ? "Won" : "Lost") + " vs " + (f.opponent() != null ? f.opponent() : "an unknown opponent")
-				+ "  ·  " + length(f) + "  ·  " + shots + " shots  ·  " + swaps + " swaps";
+				+ "  ·  " + length(f) + "  ·  " + shots + " shots  ·  " + swaps + " swaps" + assumedNote(rows.get(hover).ratings());
 	}
 
 	@Override

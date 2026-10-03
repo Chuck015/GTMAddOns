@@ -39,6 +39,11 @@ import java.util.Map;
  *             target's armor, toughness and resistance. A hit that did well under what vanilla
  *             would is flagged LOW DAMAGE and goes to chat; every hit goes to the dev log.
  *
+ *   CLICK   - a melee click on a player that the server answered with no damage event at all. Health
+ *             is read 350 ms later: if it dropped anyway, that is logged as a MELEE DAMAGE (no damage
+ *             event); if nothing changed, a MELEE CLICK line says so (chat too when the click was fully
+ *             charged, since a full-charge click that does nothing is the suspicious kind).
+ *
  * The expected figure is vanilla's: attack damage x (0.2 + charge^2 x 0.8), then armor (with
  * toughness) and resistance. It ignores enchantments and anything GTM does on its own, so a
  * gap means "something other than vanilla changed this hit", not necessarily a bug by itself.
@@ -49,6 +54,8 @@ final class MeleeDamageDebugger {
 	private static final long HIT_RESOLVE_NANOS = 200_000_000L;
 	/** A click's charge is used for a hit that comes within this long after it. */
 	private static final long CLICK_MATCH_NANOS = 500_000_000L;
+	/** A click that got no damage event is judged this long after it. */
+	private static final long CLICK_RESOLVE_NANOS = 350_000_000L;
 	private static final double LOW_FRACTION = 0.6;
 	private static final double NEARBY = 12.0;
 
@@ -59,12 +66,21 @@ final class MeleeDamageDebugger {
 		final float charge;
 		final int targetId;
 		final float targetHealthBefore;
+		final String targetName, weapon;
+		final double distance, attackDamage;
+		/** A damage event for this click arrived: the hit is handled by onHit instead. */
+		boolean eventSeen = false;
 
-		Click(long nanos, float charge, int targetId, float targetHealthBefore) {
+		Click(long nanos, float charge, int targetId, float targetHealthBefore, String targetName, String weapon, double distance,
+				double attackDamage) {
 			this.nanos = nanos;
 			this.charge = charge;
 			this.targetId = targetId;
 			this.targetHealthBefore = targetHealthBefore;
+			this.targetName = targetName;
+			this.weapon = weapon;
+			this.distance = distance;
+			this.attackDamage = attackDamage;
 		}
 	}
 
@@ -96,6 +112,8 @@ final class MeleeDamageDebugger {
 	}
 
 	private Click lastClick = null;
+	/** Melee clicks on a player still waiting to be judged. */
+	private final List<Click> clicks = new ArrayList<>();
 	private final List<Hit> pending = new ArrayList<>();
 	/** Health + absorption of players near you, as of the previous frame (before the server's updates for this tick). */
 	private final Map<Integer, Float> healthLastFrame = new HashMap<>();
@@ -108,6 +126,7 @@ final class MeleeDamageDebugger {
 
 	void reset() {
 		lastClick = null;
+		clicks.clear();
 		pending.clear();
 		healthLastFrame.clear();
 		lastHeldKey = null;
@@ -122,11 +141,24 @@ final class MeleeDamageDebugger {
 		if (player == null) return;
 		int targetId = -1;
 		float health = Float.NaN;
+		String targetName = "";
+		double distance = Double.NaN;
+		LivingEntity aimed = null;
 		if (client.crosshairTarget instanceof EntityHitResult hit && hit.getEntity() instanceof LivingEntity living) {
+			aimed = living;
 			targetId = living.getId();
 			health = living.getHealth() + living.getAbsorptionAmount();
+			targetName = living.getName().getString();
+			distance = player.distanceTo(living);
 		}
-		lastClick = new Click(System.nanoTime(), player.getAttackCooldownProgress(0.5f), targetId, health);
+		ItemStack held = player.getMainHandStack();
+		lastClick = new Click(System.nanoTime(), player.getAttackCooldownProgress(0.5f), targetId, health, targetName,
+				held.isEmpty() ? "empty hand" : held.getName().getString(), distance, player.getAttributeValue(EntityAttributes.ATTACK_DAMAGE));
+		// Only melee clicks on another player are judged for a missing damage event.
+		if (aimed instanceof PlayerEntity && com.example.gtmaddons.ComboTracker.isMeleeItem(held)) {
+			clicks.add(lastClick);
+			while (clicks.size() > 20) clicks.remove(0);
+		}
 	}
 
 	/** A damage event caused by you on another entity. */
@@ -140,6 +172,7 @@ final class MeleeDamageDebugger {
 		if (!com.example.gtmaddons.ComboTracker.isMeleeItem(held)) return;
 
 		long now = System.nanoTime();
+		for (Click c : clicks) if (c.targetId == targetId && now - c.nanos <= CLICK_MATCH_NANOS) c.eventSeen = true;
 		Click click = lastClick != null && now - lastClick.nanos <= CLICK_MATCH_NANOS ? lastClick : null;
 		double charge = click != null ? click.charge : player.getAttackCooldownProgress(0.5f);
 
@@ -150,7 +183,13 @@ final class MeleeDamageDebugger {
 		if (lastFrame != null && (Float.isNaN(before) || pendingFor(targetId) == null)) before = lastFrame;
 		if (Float.isNaN(before)) before = living.getHealth() + living.getAbsorptionAmount();
 
-		double attackDamage = player.getAttributeValue(EntityAttributes.ATTACK_DAMAGE);
+		pending.add(makeHit(player, living, held.isEmpty() ? "empty hand" : held.getName().getString(), damageType, before, charge,
+				player.getAttributeValue(EntityAttributes.ATTACK_DAMAGE)));
+	}
+
+	/** A hit with what vanilla would deal for it: attack damage x charge, then the target's armor, toughness and resistance. */
+	private Hit makeHit(ClientPlayerEntity player, LivingEntity living, String weapon, String damageType, float before, double charge,
+			double attackDamage) {
 		double armor = living.getArmor();
 		double toughness = living.getAttributeValue(EntityAttributes.ARMOR_TOUGHNESS);
 		StatusEffectInstance resistance = living.getStatusEffect(StatusEffects.RESISTANCE);
@@ -160,8 +199,8 @@ final class MeleeDamageDebugger {
 		double expected = afterArmor(raw, armor, toughness);
 		if (resistanceLevel > 0) expected *= Math.max(0.0, 1.0 - 0.2 * resistanceLevel);
 
-		pending.add(new Hit(targetId, living.getName().getString(), held.isEmpty() ? "empty hand" : held.getName().getString(), damageType,
-				before, attackDamage, charge, raw, expected, armor, toughness, resistanceLevel, attackerState(player)));
+		return new Hit(living.getId(), living.getName().getString(), weapon, damageType,
+				before, attackDamage, charge, raw, expected, armor, toughness, resistanceLevel, attackerState(player));
 	}
 
 	private Hit pendingFor(int targetId) {
@@ -177,6 +216,7 @@ final class MeleeDamageDebugger {
 			return;
 		}
 		resolveHits(client);
+		resolveClicks(client, player);
 		watchAttackDamage(player);
 		watchHeldItem(client, player);
 
@@ -185,6 +225,35 @@ final class MeleeDamageDebugger {
 		for (PlayerEntity other : client.world.getPlayers()) {
 			if (other != player && other.squaredDistanceTo(player) <= NEARBY * NEARBY) {
 				healthLastFrame.put(other.getId(), other.getHealth() + other.getAbsorptionAmount());
+			}
+		}
+	}
+
+	// ---- Clicks the server never answered with a damage event ----
+
+	private void resolveClicks(MinecraftClient client, ClientPlayerEntity player) {
+		long now = System.nanoTime();
+		for (Iterator<Click> it = clicks.iterator(); it.hasNext(); ) {
+			Click c = it.next();
+			if (now - c.nanos < CLICK_RESOLVE_NANOS) continue;
+			it.remove();
+			if (c.eventSeen) continue; // onHit handled it
+			Entity target = client.world.getEntityById(c.targetId);
+			boolean gone = !(target instanceof LivingEntity) || !target.isAlive();
+			double after = gone ? 0.0 : ((LivingEntity) target).getHealth() + ((LivingEntity) target).getAbsorptionAmount();
+			double dealt = Math.max(0.0, c.targetHealthBefore - after);
+			if (dealt > 0.05 && target instanceof LivingEntity living) {
+				// Health dropped though no damage event came: still a melee hit worth judging.
+				report(makeHit(player, living, c.weapon, "no damage event from the server", c.targetHealthBefore, c.charge, c.attackDamage), dealt, gone);
+				continue;
+			}
+			log.openWindow(client);
+			log.add(String.format("MELEE CLICK  \"%s\" on %s at %.1f blocks: no damage event and no health change after %d ms | charge %.0f%%, attack damage %.1f",
+					c.weapon, c.targetName, c.distance, CLICK_RESOLVE_NANOS / 1_000_000L, c.charge * 100, c.attackDamage));
+			// A fully charged click that did nothing is the suspicious one; fast clicks blank on their own.
+			if (c.charge >= 0.9 && !gone) {
+				DevLogger.chat(String.format("Melee click did nothing: %s on %s, charge %.0f%% - no damage event, no health change", c.weapon, c.targetName, c.charge * 100),
+						Formatting.YELLOW);
 			}
 		}
 	}

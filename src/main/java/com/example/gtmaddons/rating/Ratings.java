@@ -62,10 +62,33 @@ public final class Ratings {
 	 * (see secondLabel). parts are what Overall is made of, in order - a part
 	 * with a null score has no data yet and was left out.
 	 */
-	public record Result(Double aim, Double movement, Double overall, List<Part> parts, List<String> breakdown) {}
+	public record Result(Double aim, Double movement, Double overall, List<Part> parts, List<String> breakdown,
+			boolean aimAssumed, boolean movementAssumed) {
+		/** A rating worked out from real data (nothing assumed). */
+		public Result(Double aim, Double movement, Double overall, List<Part> parts, List<String> breakdown) {
+			this(aim, movement, overall, parts, breakdown, false, false);
+		}
+	}
 
 	/** One part of a rating: its name, score (null = no data, left out) and weight. */
 	public record Part(String name, Double score, double weight) {}
+
+	/** Set while rating a single fight (see computeForFight): parts need only one sample, then are blended toward 50. */
+	private static final ThreadLocal<Boolean> LENIENT = ThreadLocal.withInitial(() -> false);
+
+	/** How much data a part needs: its normal minimum, or just one sample when rating a single fight. */
+	private static int need(int min) {
+		return LENIENT.get() ? 1 : min;
+	}
+
+	/**
+	 * When rating a single fight, a part with fewer samples than its normal minimum is pulled toward 50 as if the
+	 * missing samples had scored exactly 50, so one lucky swap can't score 100 and a full minimum is unchanged.
+	 */
+	private static double shrink(double score, long samples, int min) {
+		if (!LENIENT.get() || samples >= min) return score;
+		return (score * samples + RatingWeights.SCORE_AT_BASELINE * (min - samples)) / min;
+	}
 
 	private Ratings() {}
 
@@ -86,6 +109,42 @@ public final class Ratings {
 
 	public static String secondShort(PvpCategory category) {
 		return category == PvpCategory.JP ? "Mel" : "Mv";
+	}
+
+	/**
+	 * Ratings for a single fight (or a short run of fights) - unlike compute(), every rating is filled in:
+	 *   - a part with only a little data (fewer than its normal minimum) still counts, blended toward 50 in
+	 *     proportion to how much is missing;
+	 *   - a part with no data at all (no shots, no swaps, no combos) is assumed to be 50, and flagged
+	 *     (Result.aimAssumed / movementAssumed) so screens can show it as an estimate;
+	 *   - Overall is always worked out, from the real parts plus those assumed ones.
+	 * The aggregate views (Personal Stats, the leaderboard) still use compute() and need real data.
+	 */
+	public static Result computeForFight(PlayerDetail detail, PvpCategory category) {
+		LENIENT.set(true);
+		try {
+			Result r = compute(detail, category);
+			boolean aimMissing = r.aim() == null, movementMissing = r.movement() == null;
+			List<Part> parts = new ArrayList<>();
+			for (Part p : r.parts()) {
+				// The parts each category's Overall is built on (see wing, ground, air, jp): none may stay empty.
+				boolean required = switch (category) {
+					case WING, AIR -> p.name().equals("Swap") || p.name().equals("Aim");
+					case GROUND -> p.name().equals("Movement") || p.name().equals("Aim");
+					case JP -> p.name().equals("Gun aim") || p.name().equals("Melee");
+				};
+				parts.add(p.score() == null && required ? new Part(p.name(), RatingWeights.SCORE_AT_BASELINE, p.weight()) : p);
+			}
+			Double aim = aimMissing ? Double.valueOf(RatingWeights.SCORE_AT_BASELINE) : r.aim();
+			Double movement = movementMissing ? Double.valueOf(RatingWeights.SCORE_AT_BASELINE) : r.movement();
+			Double overall = weighted(parts);
+			List<String> breakdown = new ArrayList<>(r.breakdown());
+			if (aimMissing) breakdown.add("  " + aimLabel(category).toLowerCase(java.util.Locale.ROOT) + ": no shots with a gun in this fight - assumed 50");
+			if (movementMissing) breakdown.add("  " + secondLabel(category).toLowerCase(java.util.Locale.ROOT) + ": no data in this fight - assumed 50");
+			return new Result(aim, movement, overall, parts, breakdown, aimMissing, movementMissing);
+		} finally {
+			LENIENT.set(false);
+		}
 	}
 
 	/** Ratings from `detail`, which should be the player's fights of this category. */
@@ -145,7 +204,7 @@ public final class Ratings {
 	 * toward 50. Null under MIN_SHOTS_PER_GUN.
 	 */
 	public static Double gunAim(PvpCategory category, String gun, long shots, long hits, long headshots) {
-		if (shots < RatingWeights.MIN_SHOTS_PER_GUN) return null;
+		if (shots < need(RatingWeights.MIN_SHOTS_PER_GUN)) return null;
 		double baseline = RatingWeights.baseline(category, gun);
 		double points = (double) headshots * RatingWeights.HEADSHOT_POINTS
 				+ (double) (hits - headshots) * RatingWeights.BODY_SHOT_POINTS;
@@ -162,10 +221,11 @@ public final class Ratings {
 		int attempts = detail.total() - detail.cancels();
 		Averages avg = detail.avg();
 		Double swap = null;
-		if (detail.successes() < RatingWeights.MIN_SWAPS || avg == null || avg.totalMs() == null) {
+		if (detail.successes() < need(RatingWeights.MIN_SWAPS) || avg == null || avg.totalMs() == null) {
 			breakdown.add("  swap: not enough swaps yet (" + RatingWeights.MIN_SWAPS + " successful)");
 		} else {
-			swap = swapScore(detail.successes(), attempts, avg.totalMs(), RatingWeights.BEST_SWAP_MS, RatingWeights.WORST_SWAP_MS, RatingWeights.Wing.SWAP, breakdown);
+			swap = shrink(swapScore(detail.successes(), attempts, avg.totalMs(), RatingWeights.BEST_SWAP_MS, RatingWeights.WORST_SWAP_MS, RatingWeights.Wing.SWAP, breakdown),
+					detail.successes(), RatingWeights.MIN_SWAPS);
 		}
 		Double momentum = momentumScore(avg, breakdown);
 		Double kd = kdScore(detail, RatingWeights.Wing.KD, breakdown);
@@ -205,7 +265,7 @@ public final class Ratings {
 	static Double movementGunScore(PlayerDetail detail, List<String> breakdown) {
 		List<MovementGunStat> guns = detail.movementGuns() != null ? detail.movementGuns() : List.of();
 		long shots = guns.stream().filter(g -> g.avgBps() != null).mapToLong(MovementGunStat::shots).sum();
-		if (shots < RatingWeights.MIN_MOVEMENT_SHOTS) {
+		if (shots < need(RatingWeights.MIN_MOVEMENT_SHOTS)) {
 			breakdown.add(String.format("  movement: not enough movement gun shots yet (%d of %d)", shots, RatingWeights.MIN_MOVEMENT_SHOTS));
 			return null;
 		}
@@ -218,7 +278,7 @@ public final class Ratings {
 			sum += score * g.shots();
 			perGun.add(String.format("    %s: %.0f (%d shots, avg %.1f b/s)", g.gun(), score, g.shots(), g.avgBps()));
 		}
-		double score = sum / shots;
+		double score = shrink(sum / shots, shots, RatingWeights.MIN_MOVEMENT_SHOTS);
 		breakdown.add(String.format("  movement: %.0f (%.2f)", score, RatingWeights.Ground.MOVEMENT));
 		breakdown.addAll(perGun);
 		return score;
@@ -250,15 +310,16 @@ public final class Ratings {
 			for (ComboStat s : detail.combos()) if (category.name().equals(s.category())) c = s;
 		}
 		long total = c != null ? c.enemyCombos() + c.ownCombos() : 0;
-		if (c == null || total < RatingWeights.MIN_COMBOS) {
+		if (c == null || total < need(RatingWeights.MIN_COMBOS)) {
 			breakdown.add(String.format("  melee: not enough combos yet (%d of %d)", total, RatingWeights.MIN_COMBOS));
 			return null;
 		}
 		Double broke = c.enemyCombos() > 0 ? 100.0 * c.enemyBroken() / c.enemyCombos() : null;
 		Double kept = c.ownCombos() > 0 ? 100.0 * (c.ownCombos() - c.ownBroken()) / c.ownCombos() : null;
 		double share = 100.0 * c.ownCombos() / total;
-		double score = weighted(List.of(new Part("Broke", broke, RatingWeights.MELEE_BROKE_WEIGHT),
-				new Part("Kept", kept, RatingWeights.MELEE_KEPT_WEIGHT), new Part("Share", share, RatingWeights.MELEE_SHARE_WEIGHT)));
+		double score = shrink(weighted(List.of(new Part("Broke", broke, RatingWeights.MELEE_BROKE_WEIGHT),
+				new Part("Kept", kept, RatingWeights.MELEE_KEPT_WEIGHT), new Part("Share", share, RatingWeights.MELEE_SHARE_WEIGHT))),
+				total, RatingWeights.MIN_COMBOS);
 		breakdown.add(String.format("  melee: %.0f (%.2f)", score, weight));
 		breakdown.add(broke != null ? String.format("    broke: %.0f (%d of %d enemy combos)", broke, c.enemyBroken(), c.enemyCombos())
 				: "    broke: no enemy combos");
@@ -361,10 +422,11 @@ public final class Ratings {
 			if (s.avgMs() != null) totalMs += s.avgMs() * s.successes();
 		}
 		Double swap = null;
-		if (successes < RatingWeights.MIN_SWAPS) {
+		if (successes < need(RatingWeights.MIN_SWAPS)) {
 			breakdown.add("  swap: not enough swaps yet (" + RatingWeights.MIN_SWAPS + " successful)");
 		} else {
-			swap = swapScore(successes, attempts, totalMs / successes, RatingWeights.AIR_BEST_SWAP_MS, RatingWeights.AIR_WORST_SWAP_MS, RatingWeights.Air.SWAP, breakdown);
+			swap = shrink(swapScore(successes, attempts, totalMs / successes, RatingWeights.AIR_BEST_SWAP_MS, RatingWeights.AIR_WORST_SWAP_MS, RatingWeights.Air.SWAP, breakdown),
+					successes, RatingWeights.MIN_SWAPS);
 		}
 		Double melee = meleeScore(detail, category, RatingWeights.Air.MELEE, breakdown);
 		Double kd = kdScore(detail, RatingWeights.Air.KD, breakdown);
