@@ -44,7 +44,7 @@ public final class FightTracker {
 
 	public static final FightTracker INSTANCE = new FightTracker();
 
-	private static final Pattern KILL = Pattern.compile("\\[GTM\\]\\s*You killed ([A-Za-z0-9_]{1,16})!", Pattern.CASE_INSENSITIVE);
+	private static final Pattern KILL = Pattern.compile("^\\s*\\[GTM\\]\\s*You killed ([A-Za-z0-9_]{1,16})!", Pattern.CASE_INSENSITIVE);
 	/** Cop mode: "[COP MODE] X was arrested by Y!" - a kill for Y and a death for X. */
 	private static final Pattern ARREST = Pattern.compile(
 			"\\[COP MODE\\]\\s*([A-Za-z0-9_]{1,16}) was arrested by ([A-Za-z0-9_]{1,16})!", Pattern.CASE_INSENSITIVE);

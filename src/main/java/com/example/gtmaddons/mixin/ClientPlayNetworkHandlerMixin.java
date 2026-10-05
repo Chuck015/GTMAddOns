@@ -3,6 +3,7 @@ package com.example.gtmaddons.mixin;
 import com.example.gtmaddons.CombatTracker;
 import com.example.gtmaddons.FightTracker;
 import com.example.gtmaddons.HitSounds;
+import com.example.gtmaddons.JetpackParticles;
 import com.example.gtmaddons.ComboTracker;
 import com.example.gtmaddons.LatencyTester;
 import com.example.gtmaddons.gun.DevLogger;
@@ -103,11 +104,15 @@ public abstract class ClientPlayNetworkHandlerMixin {
 		}
 	}
 
-	@Inject(method = "onParticle", at = @At("HEAD"))
+	@Inject(method = "onParticle", at = @At("HEAD"), cancellable = true)
 	private void gtmaddons$onParticle(ParticleS2CPacket packet, CallbackInfo ci) {
-		if (!gtmaddons$onGameThread() || !DevLogger.INSTANCE.isEnabled()) return;
-		String id = String.valueOf(Registries.PARTICLE_TYPE.getId(packet.getParameters().getType()));
-		DevLogger.INSTANCE.onParticle(id, packet.getCount());
+		if (!gtmaddons$onGameThread()) return;
+		boolean hide = JetpackParticles.shouldHide(packet);
+		if (DevLogger.INSTANCE.isEnabled()) {
+			String id = String.valueOf(Registries.PARTICLE_TYPE.getId(packet.getParameters().getType()));
+			DevLogger.INSTANCE.onParticle(hide ? id + " (hidden)" : id, packet.getCount());
+		}
+		if (hide) ci.cancel();
 	}
 
 	@Inject(method = "onCooldownUpdate", at = @At("HEAD"))

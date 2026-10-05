@@ -47,6 +47,24 @@ public final class Settings {
 
 	/** A Start / Stop recording button beside the inventory for the swap recording (SwapSession). */
 	public boolean swapRecordButton = false;
+
+	/** Hide the flame and cloud particles of flying jetpacks (JetpackParticles). */
+	public boolean hideJetpackParticles = false;
+
+	/** 0-100: how much of the cobweb texture is made see-through (CobwebTransparency). */
+	public int cobwebTransparency = 0;
+
+	/** Crouch while flying and sneaking, like 1.8 (OldSneaking). */
+	public boolean oldSneaking = false;
+
+	/** A HUD line with the seconds left of the combat tag (CombatTracker.timerText). */
+	public boolean combatTimer = false;
+
+	/** Draw every player's head as a fish (FishHeads; 1.19.4 only for now). */
+	public boolean fishHeads = false;
+
+	/** The 25 / 50 / 100 fights choice of the stats screens (FightViews). */
+	public int statsFights = 25;
 	/** Hit sound: play a sound when you hit a player (see HitSounds). Off by default. */
 	public boolean hitSound = false;
 	/** The sound's vanilla id, its volume (0-1) and pitch (0.5-2). */

@@ -143,26 +143,32 @@ public final class FightStats {
 				fights.size(), kills, deaths, recentFights, movementGuns);
 	}
 
-	/** Air swaps grouped by type (failed and canceled attempts have no type and group as null). */
+	/** Air swaps grouped by type (failed and canceled attempts have no type and group as null), with their momentum. */
 	private static List<AirSwapStat> airSwaps(List<SwapRow> air) {
 		Map<String, List<SwapRow>> byType = new LinkedHashMap<>();
 		for (SwapRow swap : air) byType.computeIfAbsent(swap.swapType() == null ? "\u0000" : swap.swapType(), k -> new ArrayList<>()).add(swap);
 		List<AirSwapStat> out = new ArrayList<>();
 		for (Map.Entry<String, List<SwapRow>> e : byType.entrySet()) {
 			List<SwapRow> rows = e.getValue();
-			int ok = 0, canceled = 0;
-			double sum = 0, min = Double.MAX_VALUE;
+			int ok = 0, canceled = 0, moving = 0;
+			double sum = 0, min = Double.MAX_VALUE, before = 0, after = 0;
 			for (SwapRow r : rows) {
 				if ("SUCCESS".equals(r.result())) {
 					ok++;
 					sum += r.totalMs();
 					min = Math.min(min, r.totalMs());
+					if (r.speedBeforeBps() != null && r.speedAfterBps() != null) {
+						moving++;
+						before += r.speedBeforeBps();
+						after += r.speedAfterBps();
+					}
 				} else if ("CANCELED".equals(r.result())) {
 					canceled++;
 				}
 			}
 			out.add(new AirSwapStat("\u0000".equals(e.getKey()) ? null : e.getKey(), rows.size(), ok, canceled,
-					ok > 0 ? sum / ok : null, ok > 0 ? min : null));
+					ok > 0 ? sum / ok : null, ok > 0 ? min : null,
+					moving > 0 ? before / moving : null, moving > 0 ? after / moving : null, moving));
 		}
 		return out;
 	}
@@ -197,26 +203,5 @@ public final class FightStats {
 		PvpCategory category = PvpCategory.fromName(fight.category());
 		if (category == null) return null;
 		return Ratings.computeForFight(detail(history, List.of(fight)), category);
-	}
-
-	/**
-	 * The ratings you had going into and through this fight: over this fight and
-	 * the `window - 1` fights before it in the same PvP category. `all` is the
-	 * player's fights newest first; `index` is this fight's place in it.
-	 */
-	public static Ratings.Result runningRatings(FightHistory history, List<FightData> all, int index, int window) {
-		PvpCategory category = PvpCategory.fromName(all.get(index).category());
-		if (category == null) return null;
-		return Ratings.computeForFight(detail(history, trailing(all, index, window)), category);
-	}
-
-	/** This fight and the `window - 1` fights before it in the same PvP category (newest first). */
-	public static List<FightData> trailing(List<FightData> all, int index, int window) {
-		String category = all.get(index).category();
-		List<FightData> out = new ArrayList<>();
-		for (int i = index; i < all.size() && out.size() < window; i++) {
-			if (java.util.Objects.equals(category, all.get(i).category())) out.add(all.get(i));
-		}
-		return out;
 	}
 }

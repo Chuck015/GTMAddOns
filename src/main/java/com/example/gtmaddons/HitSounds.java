@@ -192,11 +192,18 @@ public final class HitSounds {
 		if (enabledOf(kind)) play(idOf(kind), volumeOf(kind), pitchOf(kind));
 	}
 
-	/** Plays a sound to you only, at the given volume (0-1) and pitch. Also used to preview in the menu. */
+	/** The loudest a hit sound can be set (200%); see play. */
+	public static final float MAX_VOLUME = 2.0f;
+
+	/** Plays a sound to you only, at the given volume (0-2, above 1 adds extra copies) and pitch. Also used to preview in the menu. */
 	public static void play(String soundId, float volume, float pitch) {
 		if (volume <= 0.0f) return;
 		Identifier id = Identifier.tryParse(soundId);
 		if (id == null) return;
-		MinecraftClient.getInstance().getSoundManager().play(PositionedSoundInstance.ui(SoundEvent.of(id), pitch, volume));
+		// Minecraft never plays a sound above 100%, so anything above that is played as extra copies on top of each other.
+		for (float left = Math.min(volume, MAX_VOLUME); left > 0.0f; left -= 1.0f) {
+			float part = Math.min(1.0f, left);
+			MinecraftClient.getInstance().getSoundManager().play(PositionedSoundInstance.ui(SoundEvent.of(id), pitch, part));
+		}
 	}
 }

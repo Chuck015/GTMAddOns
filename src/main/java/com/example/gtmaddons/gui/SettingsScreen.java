@@ -1,10 +1,12 @@
 package com.example.gtmaddons.gui;
 
+import com.example.gtmaddons.CobwebTransparency;
 import com.example.gtmaddons.GTMAddOnsClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ConfirmScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
+import net.minecraft.client.gui.widget.SliderWidget;
 import net.minecraft.screen.ScreenTexts;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
@@ -14,10 +16,14 @@ import net.minecraft.util.Formatting;
  * opens the same screen on its own page:
  *
  *   hub   Move HUD, then PVP, QOL, Miscellaneous, and PVE (coming soon)
- *   PVP   hit sound, swap timer (opens SwapTimerScreen), swap recording button, advanced
- *         swap info, better combo timers, boost angle, boost height
+ *   PVP   a row of tabs across the top, one section below at a time:
+ *           Wing    cobweb transparency (a slider), boost angle, boost height, swap recording,
+ *                   advanced swap info, swap timer (opens SwapTimerScreen)
+ *           JP      better combo timers, jetpack sneak animation, hide jetpack particles
+ *           Ground  (nothing yet)
+ *           General hit sound, combat timer (a HUD line you can move)
  *   QOL   sounds, better near
- *   MISC  latency tester, GTMAddOns icon, then dev mode / QA mode side by
+ *   MISC  latency tester, GTMAddOns icon, fish cat, then dev mode / QA mode side by
  *         side and admin mode under them
  */
 public class SettingsScreen extends Screen {
@@ -47,6 +53,24 @@ public class SettingsScreen extends Screen {
 	private String status = null;
 	/** Where the Back button ended up, so the status line can go under it. */
 	private int backY = 0;
+	/** Section titles and notes drawn between the buttons (PVP page): text, y and colour. */
+	private final java.util.List<Object[]> labels = new java.util.ArrayList<>();
+	private static final int NOTE_COLOR = 0xFF888888;
+
+	/** The PVP page's tabs. The one open is remembered, so coming back shows the same one. */
+	private enum PvpTab {
+		WING("Wing"), JP("JP"), GROUND("Ground"), GENERAL("General");
+
+		final String label;
+
+		PvpTab(String label) {
+			this.label = label;
+		}
+	}
+
+	private static PvpTab pvpTab = PvpTab.WING;
+	/** Rows in the biggest tab (Wing): every tab reserves this much, so Back stays put when you switch. */
+	private static final int PVP_ROWS = 6;
 
 	public SettingsScreen(Screen parent, GTMAddOnsClient mod) {
 		this(parent, mod, Page.HUB);
@@ -61,6 +85,7 @@ public class SettingsScreen extends Screen {
 
 	@Override
 	protected void init() {
+		labels.clear();
 		int x = width / 2 - BUTTON_WIDTH / 2;
 		int y = top();
 		switch (page) {
@@ -95,18 +120,45 @@ public class SettingsScreen extends Screen {
 	}
 
 	private int buildPvp(int x, int y) {
-		addDrawableChild(ButtonWidget.builder(Text.literal("Hit sound..."), b -> client.setScreen(new HitSoundScreen(this, mod)))
-				.dimensions(x, y, BUTTON_WIDTH, 20).build());
-		y += ROW;
-		addDrawableChild(ButtonWidget.builder(Text.literal("Swap timer..."), b -> client.setScreen(new SwapTimerScreen(this, mod)))
-				.dimensions(x, y, BUTTON_WIDTH, 20).build());
-		y += ROW;
-		y = toggle(x, y, "Swap recording", mod::isSwapRecordButtonOn, mod::setSwapRecordButtonOn);
-		y = toggle(x, y, "Advanced swap info", mod::isSwapDebugOn, mod::setSwapDebugOn);
-		y = toggle(x, y, "Better combo timers", mod::isComboTimerOn, mod::setComboTimerOn);
-		y = toggle(x, y, "Boost angle", mod::isBoostAngleOn, mod::setBoostAngleOn);
-		y = toggle(x, y, "Boost height", mod::isBoostHeightOn, mod::setBoostHeightOn);
-		return y;
+		int start = y;
+		// The tabs, side by side; the open one is greyed out.
+		int chip = 62, gap = 4;
+		int tx = width / 2 - (PvpTab.values().length * (chip + gap) - gap) / 2;
+		for (PvpTab tab : PvpTab.values()) {
+			ButtonWidget button = ButtonWidget.builder(Text.literal(tab.label), b -> {
+				pvpTab = tab;
+				clearAndInit();
+			}).dimensions(tx, y, chip, 20).build();
+			button.active = tab != pvpTab;
+			addDrawableChild(button);
+			tx += chip + gap;
+		}
+		y += ROW + GAP / 2;
+
+		switch (pvpTab) {
+			case WING -> {
+				addDrawableChild(new CobwebSlider(x, y));
+				y += ROW;
+				y = toggle(x, y, "Boost angle", mod::isBoostAngleOn, mod::setBoostAngleOn);
+				y = toggle(x, y, "Boost height", mod::isBoostHeightOn, mod::setBoostHeightOn);
+				y = toggle(x, y, "Swap recording", mod::isSwapRecordButtonOn, mod::setSwapRecordButtonOn);
+				y = toggle(x, y, "Advanced swap info", mod::isSwapDebugOn, mod::setSwapDebugOn);
+				addDrawableChild(ButtonWidget.builder(Text.literal("Swap timer..."), b -> client.setScreen(new SwapTimerScreen(this, mod)))
+						.dimensions(x, y, BUTTON_WIDTH, 20).build());
+			}
+			case JP -> {
+				y = toggle(x, y, "Better combo timers", mod::isComboTimerOn, mod::setComboTimerOn);
+				y = toggle(x, y, "Jetpack sneak animation", mod::isOldSneakingOn, mod::setOldSneakingOn);
+				toggle(x, y, "Hide jetpack particles", mod::isHideJetpackParticlesOn, mod::setHideJetpackParticlesOn);
+			}
+			case GROUND -> labels.add(new Object[] { "Nothing here yet", y + 4, NOTE_COLOR });
+			case GENERAL -> {
+				addDrawableChild(ButtonWidget.builder(Text.literal("Hit sound..."), b -> client.setScreen(new HitSoundScreen(this, mod)))
+						.dimensions(x, y, BUTTON_WIDTH, 20).build());
+				toggle(x, y + ROW, "Combat timer", mod::isCombatTimerOn, mod::setCombatTimerOn);
+			}
+		}
+		return start + ROW + GAP / 2 + PVP_ROWS * ROW;
 	}
 
 	private int buildQol(int x, int y) {
@@ -120,6 +172,7 @@ public class SettingsScreen extends Screen {
 	private int buildMisc(int x, int y) {
 		y = toggle(x, y, "Latency tester", mod::isLatencyTesterOn, mod::setLatencyTesterOn);
 		y = toggle(x, y, "GTMAddOns icon", mod::isModIconsOn, mod::setModIconsOn);
+		y = toggle(x, y, "Fish cat", mod::isFishHeadsOn, mod::setFishHeadsOn);
 
 		// Dev and QA mode sit apart from the other options, side by side, with admin
 		// mode under them. Only one of dev / QA can be on; turning one on switches the
@@ -149,9 +202,9 @@ public class SettingsScreen extends Screen {
 	private int contentHeight() {
 		int rows = switch (page) {
 			case HUB -> ROW + GAP + 4 * ROW;
-			case PVP -> 7 * ROW;
+			case PVP -> ROW + GAP / 2 + PVP_ROWS * ROW;
 			case QOL -> 2 * ROW;
-			case MISC -> 2 * ROW + GAP + 2 * ROW - GAP;
+			case MISC -> 3 * ROW + GAP + 2 * ROW - GAP;
 		};
 		return rows + GAP + 20;
 	}
@@ -198,7 +251,28 @@ public class SettingsScreen extends Screen {
 
 	@Override
 	public void close() {
+		// The cobweb texture is only read when resources load, so a changed slider reloads them once.
+		if (page == Page.PVP) CobwebTransparency.reloadIfChanged();
 		client.setScreen(parent);
+	}
+
+	/** 0-100% of the cobweb made see-through, saved as it's dragged; applied when you leave this page. */
+	private final class CobwebSlider extends SliderWidget {
+		CobwebSlider(int x, int y) {
+			super(x, y, BUTTON_WIDTH, 20, Text.empty(), mod.getCobwebTransparency() / 100.0);
+			updateMessage();
+		}
+
+		@Override
+		protected void updateMessage() {
+			int percent = (int) Math.round(value * 100);
+			setMessage(Text.literal(percent == 0 ? "Cobweb transparency: Off" : "Cobweb transparency: " + percent + "%"));
+		}
+
+		@Override
+		protected void applyValue() {
+			mod.setCobwebTransparency((int) Math.round(value * 100));
+		}
 	}
 
 	private static Text onOff(String label, boolean on) {
@@ -209,6 +283,9 @@ public class SettingsScreen extends Screen {
 	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
 		super.render(context, mouseX, mouseY, deltaTicks);
 		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, top() - 16, 0xFFFFFFFF);
+		for (Object[] label : labels) {
+			context.drawCenteredTextWithShadow(textRenderer, Text.literal((String) label[0]), width / 2, (int) label[1] + 1, (int) label[2]);
+		}
 		if (status != null) {
 			context.drawCenteredTextWithShadow(textRenderer, Text.literal(status), width / 2, backY + 26, 0xFFFFFF55);
 		}

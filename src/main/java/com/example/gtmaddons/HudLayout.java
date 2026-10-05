@@ -29,7 +29,8 @@ public final class HudLayout {
 		BOOST_ANGLE("Boost angle", false, Text.literal("✔ Boost ready · 14.2° up").formatted(Formatting.GREEN)),
 		BOOST_HEIGHT("Boost height", false, Text.literal("✔ Low enough to boost · Y 187 (limit 200)").formatted(Formatting.GREEN)),
 		COMBO_LOCK("Combo'd timer", false, Text.literal("⚔ Combo'd |||||||||||||||||||| 0.43s").formatted(Formatting.RED)),
-		COMBO_HIT("Hit again timer", false, Text.literal("⚔ Hit again |||||||||||||||||||| 0.31s").formatted(Formatting.AQUA));
+		COMBO_HIT("Hit again timer", false, Text.literal("⚔ Hit again |||||||||||||||||||| 0.31s").formatted(Formatting.AQUA)),
+		COMBAT_TIMER("Combat timer", false, Text.literal("⚔ In combat 12.4s").formatted(Formatting.RED));
 
 		public final String label;
 		public final boolean leftAligned;
@@ -55,6 +56,7 @@ public final class HudLayout {
 				case BOOST_HEIGHT -> new int[] { w / 2, h / 2 + 22 };
 				case COMBO_LOCK -> new int[] { w / 2, h / 2 - 34 };
 				case COMBO_HIT -> new int[] { w / 2, h / 2 - 24 };
+				case COMBAT_TIMER -> new int[] { w / 2, h / 2 + 34 };
 			};
 		}
 	}

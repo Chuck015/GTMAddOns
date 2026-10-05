@@ -140,6 +140,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	// after the close (less if you land) while your speed is averaged over
 	// that time, then goes to the fight.
 	private static final long MOMENTUM_WINDOW_NANOS = 2_000_000_000L;
+	/** Momentum is only measured when you were already moving this fast (blocks/s): sprinting is 5.6, a glide 20 or more. */
+	private static final double MOMENTUM_MIN_BPS = 10.0;
 	private SwapRecord momentumRecord = null;
 	private boolean momentumInFight = false;
 	private long momentumStartNanos = 0L;
@@ -165,6 +167,10 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		Updater.INSTANCE.start();
 		ModUsers.init(stats, settings);
+		JetpackParticles.init(settings);
+		CobwebTransparency.init(settings);
+		com.example.gtmaddons.gui.FightViews.init(settings);
+		OldSneaking.init(settings);
 		stats.setShowUsers(settings.showModUsers);
 		HudRenderCallback.EVENT.register(this::onHudRender);
 		ClientCommandRegistrationCallback.EVENT.register(this::registerCommands);
@@ -175,6 +181,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			MinecraftClient client = MinecraftClient.getInstance();
 			long frameStart = System.nanoTime();
 			momentumFrame(client);
+			ModUsers.onFrame(client);
 			// Before CombatTracker, so a death is seen before it clears the tag.
 			FightTracker.INSTANCE.onFrame(client);
 			CombatTracker.INSTANCE.onFrame(client);
@@ -275,6 +282,51 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		// A swap still having its momentum measured counts too.
 		finishMomentum();
 		SwapSession.INSTANCE.end();
+	}
+
+	public boolean isFishHeadsOn() {
+		return settings.fishHeads;
+	}
+
+	public void setFishHeadsOn(boolean on) {
+		settings.fishHeads = on;
+		settings.save();
+	}
+
+	public boolean isCombatTimerOn() {
+		return settings.combatTimer;
+	}
+
+	public void setCombatTimerOn(boolean on) {
+		settings.combatTimer = on;
+		settings.save();
+	}
+
+	public boolean isOldSneakingOn() {
+		return settings.oldSneaking;
+	}
+
+	public void setOldSneakingOn(boolean on) {
+		settings.oldSneaking = on;
+		settings.save();
+	}
+
+	public int getCobwebTransparency() {
+		return settings.cobwebTransparency;
+	}
+
+	public void setCobwebTransparency(int percent) {
+		settings.cobwebTransparency = Math.max(0, Math.min(100, percent));
+		settings.save();
+	}
+
+	public boolean isHideJetpackParticlesOn() {
+		return settings.hideJetpackParticles;
+	}
+
+	public void setHideJetpackParticlesOn(boolean on) {
+		settings.hideJetpackParticles = on;
+		settings.save();
 	}
 
 	public boolean isSwapRecordButtonOn() {
@@ -439,6 +491,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			case BOOST_ANGLE -> settings.boostAngle;
 			case BOOST_HEIGHT -> settings.boostHeight;
 			case COMBO_LOCK, COMBO_HIT -> settings.comboTimer;
+			case COMBAT_TIMER -> settings.combatTimer;
 		};
 	}
 
@@ -485,7 +538,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		}
 		status.accept("Loading the leaderboard...");
 		PvpCategory tab = getLeaderboardTab();
-		stats.fetchLeaderboard(tab, PlayersScreen.DEFAULT_FIGHTS, java.util.Set.of()).whenComplete((board, error) -> {
+		stats.fetchLeaderboard(tab, com.example.gtmaddons.gui.FightViews.get(), java.util.Set.of()).whenComplete((board, error) -> {
 			MinecraftClient client = MinecraftClient.getInstance();
 			// Runs on the game thread, after the chat screen has closed.
 			client.execute(() -> {
@@ -516,7 +569,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			return;
 		}
 		status.accept("Loading your stats...");
-		stats.fetchPlayer(me.toString().replace("-", ""), 25, PlayerScreen.openingTab(this)).whenComplete((detail, error) -> client.execute(() -> {
+		stats.fetchPlayer(me.toString().replace("-", ""), com.example.gtmaddons.gui.FightViews.get(), PlayerScreen.openingTab(this)).whenComplete((detail, error) -> client.execute(() -> {
 			if (error != null) {
 				status.accept("Couldn't load your stats: " + Format.error(error));
 			} else if (isInCombat()) {
@@ -702,6 +755,13 @@ public class GTMAddOnsClient implements ClientModInitializer {
 				airJetpackDelta = jetpackDelta;
 				airWingsuitDelta = wingsuitDelta;
 				arrivalNanos = jetpackDelta != 0 || wingsuitDelta != 0 ? nowNanos : -1L;
+				// Momentum, as for Wing: a wingsuit that ended in a hotbar slot that was empty when you opened the inventory.
+				wingToBlankSlot = false;
+				if (wingsuitDelta > 0) {
+					for (int i = 0; i < HOTBAR_SIZE && i < inventoryAtOpen.length; i++) {
+						if (isWingsuit(inventory.getStack(i)) && inventoryAtOpen[i].isEmpty()) wingToBlankSlot = true;
+					}
+				}
 			}
 		} else if (arrivalNanos < 0 && countHotbarWingsuits(inventory) > hotbarWingsuitsAtOpen) {
 			arrivalNanos = nowNanos;
@@ -858,7 +918,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		long reachNanos = debugTracker.reachNanos();
 		double deg = degreesPerPixel(client);
 		// Momentum: speed before and right after a Wing swap into an empty hotbar slot.
-		boolean momentum = result == SwapResult.SUCCESS && !airSwap && wingToBlankSlot;
+		boolean momentum = result == SwapResult.SUCCESS && wingToBlankSlot && speedAtOpenBps >= MOMENTUM_MIN_BPS;
 
 		return new SwapRecord(
 				System.currentTimeMillis(),
@@ -981,6 +1041,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		// The combo timers check their own setting, and only one shows at a time.
 		HudLayout.draw(drawContext, font, HudLayout.Element.COMBO_LOCK, ComboTracker.INSTANCE.lockText());
 		HudLayout.draw(drawContext, font, HudLayout.Element.COMBO_HIT, ComboTracker.INSTANCE.hitText());
+		if (settings.combatTimer) HudLayout.draw(drawContext, font, HudLayout.Element.COMBAT_TIMER, CombatTracker.INSTANCE.timerText());
 		if (settings.boostAngle) HudLayout.draw(drawContext, font, HudLayout.Element.BOOST_ANGLE, BoostAngleHud.text(client));
 		if (settings.boostHeight) HudLayout.draw(drawContext, font, HudLayout.Element.BOOST_HEIGHT, BoostHeightHud.text(client));
 		if (settings.showSwapTimer && swapTimerText != null && nowMillis - swapTimerMillis < SWAP_TIMER_DISPLAY_MS) {

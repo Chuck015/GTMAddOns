@@ -9,8 +9,10 @@
     "LivingEntityInvoker",
     "MinecraftClientMixin",
     "NameTagMixin",
+    "PlayerSneakAnimationMixin",
     "PlayerListHudMixin",
-    "SoundSystemMixin"
+    "SoundSystemMixin",
+    "SpriteContentsMixin"
   ],
   "injectors": {
     "defaultRequire": 1

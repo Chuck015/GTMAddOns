@@ -30,7 +30,11 @@ import java.util.regex.Pattern;
  *   - Hit:      a damage event caused by you arrives in the same server
  *               tick as the ammo drop - within a few ms of it.
  *   - Headshot: an empty title with the subtitle "⊕" arrives with the hit.
- *   - Kill:     the chat message "You killed <name>!" arrives with the hit.
+ *   - Kill:     the chat message "You killed <name>!" arrives with the killing hit. It is tied to the last
+ *               damage you dealt to <name> just before it, and the gun of the shot that damage belongs to
+ *               gets the kill (see killingShot) - not the shot nearest the message in time, which in a burst
+ *               of automatic fire can be the one before, and not the gun you hold when the message arrives,
+ *               which with ping can already be another gun.
  *   - Net Launcher: only a hit on a player wearing a wingsuit counts (it nets
  *               them); a hit on anyone else is just a damage tick, so it's a
  *               miss. See countsOnlyWingsuitHits.
@@ -53,7 +57,10 @@ public final class ShotTracker {
 	private static final Pattern NOT_NAME = Pattern.compile("[^\\p{L}\\p{N} '\\-]");
 	private static final Pattern SPACES = Pattern.compile("\\s+");
 	private static final Pattern AMMO_PATTERN = Pattern.compile("(\\d+)\\s*/\\s*(\\d+)");
-	private static final Pattern KILL_PATTERN = Pattern.compile("You killed (\\w{1,16})");
+	/** GTM's own message, at the start of the line - not a player typing it in chat ("Name> [GTM] You killed X!"). */
+	private static final Pattern KILL_PATTERN = Pattern.compile("^\\s*\\[GTM\\]\\s*You killed (\\w{1,16})");
+	/** The killing damage arrives within a few ms of the kill message; allow this much either way. */
+	private static final long KILL_DAMAGE_BEFORE_NANOS = 250_000_000L, KILL_DAMAGE_AFTER_NANOS = 5_000_000L;
 	private static final String HEADSHOT_MARKER = "⊕";
 	private static final long MATCH_NANOS = 40_000_000L;
 	private static final long SETTLE_NANOS = 150_000_000L;
@@ -276,6 +283,14 @@ public final class ShotTracker {
 		List<String> damageNotes = new ArrayList<>();
 
 		for (Event event : events) {
+			if (event.kind == Kind.KILL) {
+				// Only the shot whose damage killed the target gets the kill.
+				if (event.claimed || killingShot(event) != shot) continue;
+				event.claimed = true;
+				kill = true;
+				if (target == null) target = event.detail;
+				continue;
+			}
 			if (event.claimed || nearestShot(event) != shot) continue;
 			event.claimed = true;
 			switch (event.kind) {
@@ -292,10 +307,7 @@ public final class ShotTracker {
 					hit = true;
 				}
 				case HEADSHOT -> headshot = true;
-				case KILL -> {
-					kill = true;
-					if (target == null) target = event.detail;
-				}
+				case KILL -> { }
 				case SOUND -> otherSounds.add(event.detail);
 			}
 		}
@@ -343,6 +355,22 @@ public final class ShotTracker {
 			if (first == null) first = sound;
 		}
 		return first;
+	}
+
+	/**
+	 * The shot that killed: the last damage you dealt to the victim just before the kill message (they arrive in the
+	 * same server tick, so their gap is the same whatever your ping), and the shot that damage belongs to. Null if no
+	 * damage on that player is near the message, or no shot is near that damage - a melee or other kill.
+	 */
+	private Shot killingShot(Event kill) {
+		Event damage = null;
+		for (Event event : events) {
+			if (event.kind != Kind.DAMAGE || event.detail == null || !event.detail.equalsIgnoreCase(kill.detail)) continue;
+			long gap = kill.nanos - event.nanos;
+			if (gap < -KILL_DAMAGE_AFTER_NANOS || gap > KILL_DAMAGE_BEFORE_NANOS) continue;
+			if (damage == null || event.nanos > damage.nanos) damage = event;
+		}
+		return damage != null ? nearestShot(damage) : null;
 	}
 
 	private Shot nearestShot(Event event) {

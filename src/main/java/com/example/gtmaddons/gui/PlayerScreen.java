@@ -56,7 +56,8 @@ public class PlayerScreen extends Screen {
 	/** What's on screen, and which view it is; blank while the picked view loads. */
 	private PlayerDetail detail;
 	private String shownKey;
-	private int viewFights = FIGHT_VIEWS[0];
+	/** The chosen 25 / 50 / 100 (remembered, see FightViews); the detail passed in was loaded for it. */
+	private int viewFights = FightViews.get();
 	/** "Loading..." or an error, shown instead of the subtitle. */
 	private String status = null;
 	private PvpCategory selected;
@@ -218,6 +219,7 @@ public class PlayerScreen extends Screen {
 	private void selectView(int fights) {
 		filter = null;
 		viewFights = fights;
+		FightViews.set(fights);
 		show();
 	}
 

@@ -105,9 +105,12 @@ final class StatsOverview {
 
 		// Row B: three stat cards, then the two gun cards (gun stats gets more room for its columns).
 		int yb = y + ROW_A + GAP;
-		int availB = w - 4 * GAP;
-		int smallW = Math.round(availB * 0.18f);
-		int listW = (availB - 3 * smallW) * 2 / 5;
+		// Air gets a MELEE card as well (JP already has melee in its breakdown and third cards; Wing and Ground have none).
+		boolean meleeCard = category == PvpCategory.AIR;
+		int smalls = meleeCard ? 4 : 3;
+		int availB = w - (smalls + 1) * GAP;
+		int smallW = Math.round(availB * (meleeCard ? 0.145f : 0.18f));
+		int listW = (availB - smalls * smallW) * 2 / 5;
 		cx = x;
 		hitCard(context, font, data, cx, yb, smallW, ROW_B);
 		hovered = hover(context, Insight.GUNS, cx, yb, smallW, ROW_B, mouseX, mouseY, hovered);
@@ -118,6 +121,11 @@ final class StatsOverview {
 		thirdCard(context, font, data, category, cx, yb, smallW, ROW_B);
 		hovered = hover(context, thirdInsight(category), cx, yb, smallW, ROW_B, mouseX, mouseY, hovered);
 		cx += smallW + GAP;
+		if (meleeCard) {
+			meleeCard(context, font, data, cx, yb, smallW, ROW_B);
+			hovered = hover(context, Insight.MELEE, cx, yb, smallW, ROW_B, mouseX, mouseY, hovered);
+			cx += smallW + GAP;
+		}
 		mostShotsCard(context, font, data.guns, cx, yb, listW, ROW_B);
 		hovered = hover(context, Insight.GUNS, cx, yb, listW, ROW_B, mouseX, mouseY, hovered);
 		cx += listW + GAP;
@@ -203,7 +211,7 @@ final class StatsOverview {
 	/** The category's breakdown: a big headline stat, then up to four pies with labels. */
 	private static void breakdownCard(DrawContext context, TextRenderer font, Data d, PvpCategory category, int x, int y, int w, int h) {
 		List<Pie> pies = new ArrayList<>();
-		String title, prefix, big;
+		String title, prefix, big, corner = null;
 		int headline = accent;
 		switch (category) {
 			case AIR -> {
@@ -215,6 +223,9 @@ final class StatsOverview {
 					successes += s.successes();
 				}
 				prefix = "Swaps";
+				double airTotal = 0;
+				for (AirSwapStat s : stats) if (s.avgMs() != null) airTotal += s.avgMs() * s.successes();
+				if (successes > 0) corner = "Avg " + Format.seconds(airTotal / successes);
 				big = pct(attempts > 0 ? (double) successes / attempts : Double.NaN);
 				headline = rate(attempts > 0 ? (double) successes / attempts : Double.NaN);
 				String[][] types = { { "JETPACK", "JP" }, { "WINGSUIT", "Wing" }, { "JP_TO_WING", "JP>W" }, { "WING_TO_JP", "W>JP" } };
@@ -232,8 +243,8 @@ final class StatsOverview {
 				prefix = "Breaks";
 				big = pct(broke);
 				headline = rate(broke);
-				pies.add(new Pie("You broke", broke, rate(broke), c != null ? c.enemyBroken() + "/" + c.enemyCombos() : "-"));
-				pies.add(new Pie("Kept yours", kept, rate(kept), c != null ? (c.ownCombos() - c.ownBroken()) + "/" + c.ownCombos() : "-"));
+				pies.add(new Pie("Broke", broke, rate(broke), c != null ? c.enemyBroken() + "/" + c.enemyCombos() : "-"));
+				pies.add(new Pie("Kept", kept, rate(kept), c != null ? (c.ownCombos() - c.ownBroken()) + "/" + c.ownCombos() : "-"));
 				long firstHits = c != null ? c.ownFirstHits() + c.enemyFirstHits() : 0;
 				pies.add(new Pie("First hit", firstHits > 0 ? (double) c.ownFirstHits() / firstHits : Double.NaN, Ui.BLUE,
 						firstHits > 0 ? c.ownFirstHits() + "/" + firstHits : "-"));
@@ -251,6 +262,7 @@ final class StatsOverview {
 		// "Swaps 87%" - small gray prefix, big white number.
 		context.drawTextWithShadow(font, prefix, x + 8, y + 26, Ui.LABEL);
 		Ui.bigText(context, font, big, x + 12 + font.getWidth(prefix), y + 20, 2f, headline, false);
+		if (corner != null) Ui.textRight(context, font, corner, x + w - 8, y + 26, Ui.LABEL);
 		context.fill(x + 6, y + 42, x + w - 6, y + 43, Ui.CARD_BORDER);
 
 		pies(context, font, pies, x + 6, y, w - 12);
@@ -275,7 +287,7 @@ final class StatsOverview {
 	/**
 	 * Wing: swap success and swap time in one card. Success % and the average
 	 * swap time up top; below, success and mouse efficiency pies beside the
-	 * time splits.
+	 * fastest swap and the total. The step-by-step times are on the card's insight page.
 	 */
 	private static void wingSwapCard(DrawContext context, TextRenderer font, Data d, int x, int y, int w, int h) {
 		Ui.card(context, font, x, y, w, h, "SWAPS");
@@ -304,12 +316,10 @@ final class StatsOverview {
 				new Pie("Success", success, rate(success), d.detail.successes() + "/" + attempts),
 				new Pie("Mouse", eff != null ? eff / 100 : Double.NaN, rate(eff != null ? eff / 100 : Double.NaN), "efficiency")), x + 6, y, half);
 
-		// Right half: the time splits.
+		// Right half: the fastest swap and how many swaps.
 		String[][] rows = {
 				{ "FASTEST", Format.seconds(d.detail.bestMs()) },
-				{ "REACH", avg != null ? Format.seconds(avg.reachMs()) : "-" },
-				{ "TO HOTBAR", avg != null ? Format.seconds(avg.wingToHotbarMs()) : "-" },
-				{ "SWAPS", String.valueOf(d.detail.total()) } };
+				{ "TOTAL SWAPS", String.valueOf(d.detail.total()) } };
 		int left = x + 6 + half + 4, right = x + w - 7, ry = y + 48;
 		for (String[] row : rows) {
 			int valueW = font.getWidth(row[1]);
@@ -386,20 +396,15 @@ final class StatsOverview {
 						{ "LOST", has ? Format.bps(Math.max(0, before - after)) : "-" } });
 			}
 			case AIR -> {
-				Ui.card(context, font, x, y, w, h, "SWAP TIME");
-				List<AirSwapStat> stats = d.detail.airSwaps() != null ? d.detail.airSwaps() : List.of();
-				double total = 0;
-				int successes = 0;
-				for (AirSwapStat s : stats) {
-					if (s.avgMs() != null) total += s.avgMs() * s.successes();
-					successes += s.successes();
-				}
-				bigColor = successes > 0 ? Ui.swapTimeColor(total / successes, com.example.gtmaddons.rating.RatingWeights.AIR_BEST_SWAP_MS,
-						com.example.gtmaddons.rating.RatingWeights.AIR_WORST_SWAP_MS) : Ui.TEXT;
-				iconAndBig(context, font, new ItemStack(Items.CLOCK), successes > 0 ? Format.seconds(total / successes) : "-", x, y, w);
+				// Speed kept through wingsuit swaps into an empty hotbar slot, over all Air swap types (see airMomentum).
+				Ui.card(context, font, x, y, w, h, "MOMENTUM");
+				double[] m = airMomentum(d.detail.airSwaps() != null ? d.detail.airSwaps() : List.of());
+				boolean has = m != null;
+				bigColor = has ? rate(m[0] > 0 ? m[1] / m[0] : 1) : Ui.TEXT;
+				iconAndBig(context, font, new ItemStack(Items.ELYTRA), has ? pct(m[0] > 0 ? m[1] / m[0] : 1) : "-", x, y, w);
 				rows(context, font, x, y, w, new String[][] {
-						{ "JETPACK", airAvg(stats, "JETPACK") }, { "WINGSUIT", airAvg(stats, "WINGSUIT") },
-						{ "JP > WING", airAvg(stats, "JP_TO_WING") }, { "WING > JP", airAvg(stats, "WING_TO_JP") } });
+						{ "BEFORE", has ? Format.bps(m[0]) : "-" }, { "AFTER", has ? Format.bps(m[1]) : "-" },
+						{ "LOST", has ? Format.bps(Math.max(0, m[0] - m[1])) : "-" } });
 			}
 			case JP -> {
 				// The MELEE card above has the rates; this one has the counts.
@@ -407,10 +412,10 @@ final class StatsOverview {
 				ComboStat c = d.combos;
 				iconAndBig(context, font, new ItemStack(Items.IRON_SWORD), c != null ? String.valueOf(c.ownCombos()) : "-", x, y, w);
 				rows(context, font, x, y, w, new String[][] {
-						{ "YOUR COMBOS", c != null ? String.valueOf(c.ownCombos()) : "-" },
-						{ "GOT BROKEN", c != null ? String.valueOf(c.ownBroken()) : "-" },
-						{ "THEIR COMBOS", c != null ? String.valueOf(c.enemyCombos()) : "-" },
-						{ "YOU BROKE", c != null ? String.valueOf(c.enemyBroken()) : "-" } });
+						{ "OWN COMBOS", c != null ? String.valueOf(c.ownCombos()) : "-" },
+						{ "OWN BROKEN", c != null ? String.valueOf(c.ownBroken()) : "-" },
+						{ "ENEMY COMBOS", c != null ? String.valueOf(c.enemyCombos()) : "-" },
+						{ "ENEMY BROKEN", c != null ? String.valueOf(c.enemyBroken()) : "-" } });
 			}
 			default -> {
 				// Values are blocks/s; the unit is in the title so they fit the narrow card.
@@ -433,9 +438,37 @@ final class StatsOverview {
 		}
 	}
 
+	/** Melee at a glance on the Air page: how much of the combo fight you win. Click for the Melee page. */
+	private static void meleeCard(DrawContext context, TextRenderer font, Data d, int x, int y, int w, int h) {
+		Ui.card(context, font, x, y, w, h, "MELEE");
+		ComboStat c = d.combos;
+		double kept = c != null && c.ownCombos() > 0 ? 1 - (double) c.ownBroken() / c.ownCombos() : Double.NaN;
+		bigColor = rate(kept);
+		iconAndBig(context, font, new ItemStack(Items.IRON_SWORD), pct(kept), x, y, w);
+		long firstHits = c != null ? c.ownFirstHits() + c.enemyFirstHits() : 0;
+		rows(context, font, x, y, w, new String[][] {
+				{ "KEPT", pct(kept) },
+				{ "BROKE", pct(c != null && c.enemyCombos() > 0 ? (double) c.enemyBroken() / c.enemyCombos() : Double.NaN) },
+				{ "FIRST HIT", pct(firstHits > 0 ? (double) c.ownFirstHits() / firstHits : Double.NaN) },
+				{ "COMBOS", c != null ? String.valueOf(c.ownCombos() + c.enemyCombos()) : "-" } });
+	}
+
 	private static String movementAvg(List<MovementGunStat> stats, String gun) {
 		return stats.stream().filter(s -> gun.equalsIgnoreCase(s.gun()) && s.avgBps() != null).findFirst()
 				.map(s -> String.format("%.1f", s.avgBps())).orElse("-");
+	}
+
+	/** Average speed before and after the swap, over all Air swap types (weighted by the swaps measured), or null if none. */
+	private static double[] airMomentum(List<AirSwapStat> stats) {
+		double before = 0, after = 0;
+		int n = 0;
+		for (AirSwapStat s : stats) {
+			if (s.speedBeforeBps() == null || s.speedAfterBps() == null || s.momentumSwaps() <= 0) continue;
+			before += s.speedBeforeBps() * s.momentumSwaps();
+			after += s.speedAfterBps() * s.momentumSwaps();
+			n += s.momentumSwaps();
+		}
+		return n > 0 ? new double[] { before / n, after / n } : null;
 	}
 
 	private static String airAvg(List<AirSwapStat> stats, String type) {

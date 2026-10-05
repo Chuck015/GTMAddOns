@@ -172,7 +172,7 @@ public final class SwapSession {
 		send(row("Total", seconds(r.totalMs()), Formatting.YELLOW));
 
 		if (r.speedBeforeBps() != null && r.speedAfterBps() != null) {
-			double kept = r.speedBeforeBps() > 0 ? r.speedAfterBps() / r.speedBeforeBps() * 100 : 100.0;
+			double kept = r.speedBeforeBps() > 0 ? Math.min(100.0, r.speedAfterBps() / r.speedBeforeBps() * 100) : 100.0;
 			send(Text.empty());
 			send(section("Momentum"));
 			send(row("Speed", String.format(Locale.ROOT, "%.1f → %.1f b/s", r.speedBeforeBps(), r.speedAfterBps()), Formatting.WHITE)

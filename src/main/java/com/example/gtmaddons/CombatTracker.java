@@ -40,6 +40,8 @@ public final class CombatTracker {
 	public static final CombatTracker INSTANCE = new CombatTracker();
 
 	private static final long FALLBACK_NANOS = 180_000_000_000L;
+	/** GTM's combat tag lasts this long after your last fight activity (the "20 seconds" in its message). */
+	private static final long TAG_NANOS = 20_000_000_000L;
 
 	private boolean tagged = false;
 	private long lastActivityNanos = 0L;
@@ -50,6 +52,18 @@ public final class CombatTracker {
 
 	public boolean isTagged() {
 		return tagged;
+	}
+
+	/**
+	 * The combat timer line for the HUD (null when not tagged): the seconds left of the tag, counted down from your last
+	 * hit with another player. GTM extends the tag without saying so, so this is an estimate: it stops at 0.0 until
+	 * GTM's "no longer in combat" message arrives. Red while over 10 s, yellow to 5 s, green after.
+	 */
+	public Text timerText() {
+		if (!tagged) return null;
+		double left = Math.max(0.0, (TAG_NANOS - (System.nanoTime() - lastActivityNanos)) / 1e9);
+		Formatting color = left > 10.0 ? Formatting.RED : left > 5.0 ? Formatting.YELLOW : Formatting.GREEN;
+		return Text.literal(String.format(Locale.ROOT, "⚔ In combat %.1fs", left)).formatted(color);
 	}
 
 	public int jetpacksAtStart() {
@@ -130,20 +144,16 @@ public final class CombatTracker {
 	}
 
 	/**
-	 * Hits between you and another player keep the safety-net timer going,
-	 * but never start a tag - only GTM's message does. (Starting one on any
-	 * damage made fall damage from a wingsuit landing "tag" you, and GTM
-	 * never sends an end message for a tag it didn't start.)
+	 * Any damage you deal, or take from something, restarts GTM's 20 seconds - to players or to NPCs alike - so it
+	 * restarts the timer shown on the HUD (timerText) and the safety net. It never starts a tag, though: only GTM's
+	 * message does. (Starting one on any damage made fall damage from a wingsuit landing "tag" you, and GTM never sends
+	 * an end message for a tag it didn't start.) causeId is -1 when nothing caused the damage (a fall, fire).
 	 */
 	public void onDamage(int targetId, int causeId) {
-		MinecraftClient client = MinecraftClient.getInstance();
-		ClientPlayerEntity player = client.player;
-		if (!tagged || player == null || client.world == null) return;
-		int otherId = targetId == player.getId() ? causeId : causeId == player.getId() ? targetId : -1;
-		if (otherId >= 0 && otherId != player.getId()
-				&& client.world.getEntityById(otherId) instanceof net.minecraft.entity.player.PlayerEntity) {
-			lastActivityNanos = System.nanoTime();
-		}
+		var player = MinecraftClient.getInstance().player;
+		if (!tagged || player == null) return;
+		int me = player.getId();
+		if (causeId == me || (targetId == me && causeId >= 0)) lastActivityNanos = System.nanoTime();
 	}
 
 	private void refresh() {

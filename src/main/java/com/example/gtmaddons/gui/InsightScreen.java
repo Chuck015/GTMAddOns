@@ -294,8 +294,8 @@ public class InsightScreen extends Screen {
 				latestKill ? Ui.GOOD : Ui.BAD));
 		recent.add(new Stat("Best kill streak", String.valueOf(bestStreak), Ui.TEXT));
 		recent.add(new Stat("Average fight", secs((killMs + deathMs) / (double) fights.size()), Ui.TEXT));
-		recent.add(new Stat("Average fight you won", kills > 0 ? secs(killMs / (double) kills) : "-", Ui.TEXT));
-		recent.add(new Stat("Average fight you lost", deaths > 0 ? secs(deathMs / (double) deaths) : "-", Ui.TEXT));
+		recent.add(new Stat("Average fight won", kills > 0 ? secs(killMs / (double) kills) : "-", Ui.TEXT));
+		recent.add(new Stat("Average fight lost", deaths > 0 ? secs(deathMs / (double) deaths) : "-", Ui.TEXT));
 		recent.add(new Stat("Quickest kill", kills > 0 ? secs(quickestKill) : "-", Ui.GOOD));
 		recent.add(new Stat("Longest fight", secs(longest), Ui.TEXT));
 		left.add(new Section("Last " + fights.size() + " fights", recent));
@@ -430,6 +430,27 @@ public class InsightScreen extends Screen {
 		}
 		left.add(new Section("Air swaps", summary));
 
+		// Momentum, as on the Wing page: wingsuit swaps into an empty hotbar slot.
+		double momBefore = 0, momAfter = 0;
+		int moving = 0;
+		for (AirSwapStat s : stats) {
+			if (s.speedBeforeBps() == null || s.speedAfterBps() == null || s.momentumSwaps() <= 0) continue;
+			momBefore += s.speedBeforeBps() * s.momentumSwaps();
+			momAfter += s.speedAfterBps() * s.momentumSwaps();
+			moving += s.momentumSwaps();
+		}
+		List<Row> momentum = new ArrayList<>();
+		if (moving == 0 || momBefore <= 0) {
+			momentum.add(new Note("No wingsuit swaps into an empty hotbar slot yet.", Ui.MUTED));
+		} else {
+			double kept = momAfter / momBefore * 100;
+			momentum.add(new Meter("Momentum kept", String.format("%.0f%%", kept), Ui.rateColor(kept), kept / 100));
+			momentum.add(new Stat("Speed before swap", Format.bps(momBefore / moving), Ui.TEXT));
+			momentum.add(new Stat("Speed after swap", Format.bps(momAfter / moving), Ui.TEXT));
+			momentum.add(new Stat("Swaps measured", String.valueOf(moving), Ui.TEXT));
+		}
+		left.add(new Section("Momentum", momentum));
+
 		String[][] types = { { "JETPACK", "Jetpack" }, { "WINGSUIT", "Wingsuit" }, { "JP_TO_WING", "JP → Wing" }, { "WING_TO_JP", "Wing → JP" } };
 		List<Row> use = new ArrayList<>();
 		List<Row> speed = new ArrayList<>();
@@ -464,15 +485,15 @@ public class InsightScreen extends Screen {
 				return;
 		}
 		long total = c.ownCombos() + c.enemyCombos();
-		combos.add(share("Your share of combos", c.ownCombos(), total));
-		combos.add(new Stat("Yours · theirs", c.ownCombos() + " · " + c.enemyCombos(), Ui.TEXT));
+		combos.add(share("Share of combos", c.ownCombos(), total));
+		combos.add(new Stat("Own · enemy combos", c.ownCombos() + " · " + c.enemyCombos(), Ui.TEXT));
 		left.add(new Section("Combos", combos));
 
 		List<Row> breaks = new ArrayList<>();
-		breaks.add(share("Enemy combos you broke", c.enemyBroken(), c.enemyCombos()));
-		breaks.add(share("Your combos you kept", c.ownCombos() - c.ownBroken(), c.ownCombos()));
-		breaks.add(new Stat("Your combos that got broken", c.ownBroken() + " of " + c.ownCombos(), Ui.TEXT));
-		breaks.add(new Stat("Their combos that ran out", (c.enemyCombos() - c.enemyBroken()) + " of " + c.enemyCombos(), Ui.TEXT));
+		breaks.add(share("Enemy combos broken", c.enemyBroken(), c.enemyCombos()));
+		breaks.add(share("Own combos kept", c.ownCombos() - c.ownBroken(), c.ownCombos()));
+		breaks.add(new Stat("Own combos broken", c.ownBroken() + " of " + c.ownCombos(), Ui.TEXT));
+		breaks.add(new Stat("Enemy combos that ran out", (c.enemyCombos() - c.enemyBroken()) + " of " + c.enemyCombos(), Ui.TEXT));
 		left.add(new Section("Breaks", breaks));
 
 		List<Row> first = new ArrayList<>();
@@ -480,10 +501,10 @@ public class InsightScreen extends Screen {
 		if (firstHits == 0) {
 			first.add(new Note("No first hits yet.", Ui.MUTED));
 		} else {
-			first.add(share("First hits that were yours", c.ownFirstHits(), firstHits));
-			first.add(new Stat("Yours · theirs", c.ownFirstHits() + " · " + c.enemyFirstHits(), Ui.TEXT));
-			first.add(new Stat("Your combos from a first hit", pct(c.ownCombos() > 0 ? (double) c.ownFirstHits() / c.ownCombos() : Double.NaN), Ui.TEXT));
-			first.add(new Stat("Their combos from a first hit", pct(c.enemyCombos() > 0 ? (double) c.enemyFirstHits() / c.enemyCombos() : Double.NaN), Ui.TEXT));
+			first.add(share("Own first hits", c.ownFirstHits(), firstHits));
+			first.add(new Stat("Own · enemy first hits", c.ownFirstHits() + " · " + c.enemyFirstHits(), Ui.TEXT));
+			first.add(new Stat("Own combos from a first hit", pct(c.ownCombos() > 0 ? (double) c.ownFirstHits() / c.ownCombos() : Double.NaN), Ui.TEXT));
+			first.add(new Stat("Enemy combos from a first hit", pct(c.enemyCombos() > 0 ? (double) c.enemyFirstHits() / c.enemyCombos() : Double.NaN), Ui.TEXT));
 		}
 		left.add(new Section("First hits", first));
 

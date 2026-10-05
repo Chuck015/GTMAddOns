@@ -20,7 +20,10 @@ import java.util.Map;
  *    - WEIGHTS are relative: only their ratio inside one rating matters.
  *      2.0 next to 1.0 = "counts twice as much". 0 = left out entirely.
  *    - MIN_ values are how much data a part needs before it is rated at all;
- *      below them the part shows "not enough ... yet".
+ *      below them the part shows "not enough ... yet". FULL_ values are how much
+ *      it takes to count in full: between MIN_ and FULL_ the part is pulled toward
+ *      50 in proportion (at MIN_ it is mostly 50), so little data gives a cautious
+ *      rating instead of a lucky one.
  *    - BEST / CEILING values score 100, WORST / FLOOR values score 0, and
  *      everything in between is a straight line.
  *
@@ -66,7 +69,7 @@ public final class RatingWeights {
 	public static final double BODY_SHOT_POINTS = 0.75;
 
 	/** Shots a gun needs (in that category) before it counts toward aim. */
-	public static final int MIN_SHOTS_PER_GUN = 20;
+	public static final int MIN_SHOTS_PER_GUN = 10;
 	/** Past this many shots, more shots don't make a gun count for more. */
 	public static final int SHOT_WEIGHT_CAP = 300;
 
@@ -126,16 +129,13 @@ public final class RatingWeights {
 	//     success rate, so 0.40s at 80% success scores like a 0.50s swap.
 	// ========================================================================
 
-	/** Successful swaps needed before the swap score is rated. */
-	public static final int MIN_SWAPS = 5;
+	/** Successful swaps needed before the swap score is rated, and for it to count in full. */
+	public static final int MIN_SWAPS = 3;
+	public static final int FULL_SWAPS = 5;
 
-	/** Wing: effective swap time (ms) that scores 100, and the one that scores 0. */
+	/** Effective swap time (ms) that scores 100, and the one that scores 0. Wing and Air swaps share these bounds. */
 	public static final double BEST_SWAP_MS = 250;
 	public static final double WORST_SWAP_MS = 900;
-
-	/** Air (jetpack, wingsuit and between them) takes longer, so it has its own bounds. */
-	public static final double AIR_BEST_SWAP_MS = 350;
-	public static final double AIR_WORST_SWAP_MS = 1200;
 
 	// ========================================================================
 	//  3. GROUND MOVEMENT
@@ -144,8 +144,9 @@ public final class RatingWeights {
 	//     bests 16-20.
 	// ========================================================================
 
-	/** Movement gun shots needed before Ground movement is rated. */
-	public static final int MIN_MOVEMENT_SHOTS = 10;
+	/** Movement gun shots needed before Ground movement is rated, and for it to count in full. */
+	public static final int MIN_MOVEMENT_SHOTS = 5;
+	public static final int FULL_MOVEMENT_SHOTS = 10;
 
 	/** Speed (blocks/s) that scores 0: sprinting, so the shot added nothing. */
 	public static final double MOVEMENT_FLOOR_BPS = 5.6;
@@ -158,8 +159,15 @@ public final class RatingWeights {
 	//     the enemy.
 	// ========================================================================
 
-	/** Combos (yours plus the enemy's) needed before melee is rated. */
-	public static final int MIN_COMBOS = 5;
+	/** Combos (yours plus the enemy's) needed before melee is rated, and for it to count in full. */
+	public static final int MIN_COMBOS = 3;
+	public static final int FULL_COMBOS = 5;
+
+	/**
+	 * How much melee counts inside Aim for Air, next to gun aim (1.0): 0.5 = half as much. JP keeps Gun aim and
+	 * Melee as separate ratings; Wing and Ground have no melee in their ratings. With no melee data yet, Aim is just gun aim (and the other way round).
+	 */
+	public static final double AIM_MELEE_WEIGHT = 0.5;
 
 	/** % of enemy combos you broke. */
 	public static final double MELEE_BROKE_WEIGHT = 1.0;
@@ -214,8 +222,9 @@ public final class RatingWeights {
 	public static final class Air {
 		private Air() {}
 		public static final double SWAP = 1.0;
+		/** % of your speed kept through a wingsuit swap into an empty hotbar slot (as for Wing). */
+		public static final double MOMENTUM = 1.0;
 		public static final double AIM = 1.0;
-		public static final double MELEE = 1.0;
 		public static final double KD = 1.0;
 	}
 

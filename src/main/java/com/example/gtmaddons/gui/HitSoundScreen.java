@@ -139,22 +139,22 @@ public class HitSoundScreen extends Screen {
 		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, top - 22, Ui.TEXT);
 	}
 
-	/** 0-100% volume for the open tab, saved as it's dragged. */
+	/** 0-200% volume for the open tab, saved as it's dragged. */
 	private final class VolumeSlider extends SliderWidget {
 		VolumeSlider(int x, int y) {
-			super(x, y, BUTTON_WIDTH, 20, Text.empty(), HitSounds.INSTANCE.volumeOf(selected));
+			super(x, y, BUTTON_WIDTH, 20, Text.empty(), HitSounds.INSTANCE.volumeOf(selected) / HitSounds.MAX_VOLUME);
 			updateMessage();
 		}
 
 		@Override
 		protected void updateMessage() {
-			int percent = (int) Math.round(value * 100);
+			int percent = (int) Math.round(value * 100 * HitSounds.MAX_VOLUME);
 			setMessage(Text.literal(percent == 0 ? "Volume: Muted" : "Volume: " + percent + "%"));
 		}
 
 		@Override
 		protected void applyValue() {
-			HitSounds.INSTANCE.setVolume(selected, (float) value);
+			HitSounds.INSTANCE.setVolume(selected, (float) value * HitSounds.MAX_VOLUME);
 			settings.save();
 		}
 	}

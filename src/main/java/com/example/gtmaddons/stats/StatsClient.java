@@ -322,6 +322,8 @@ public final class StatsClient {
 	/** How often to tell the backend this player is running the mod, and how often to ask who else is. */
 	private static final long HEARTBEAT_MS = 15 * 60_000L, USERS_REFRESH_MS = 5 * 60_000L;
 	private volatile java.util.Set<String> modUsers = java.util.Set.of();
+	/** Everyone the backend has listed since they joined: kept until they leave the server (see retainOnline). */
+	private final java.util.Set<String> seenModUsers = java.util.concurrent.ConcurrentHashMap.newKeySet();
 	private volatile boolean showUsers = true;
 	private volatile UUID ownAccount;
 	private long lastHeartbeatMillis = 0L, lastUsersMillis = 0L;
@@ -333,7 +335,19 @@ public final class StatsClient {
 
 	/** Whether this player runs the mod: you always do; others once the backend lists them. */
 	public boolean isModUser(UUID uuid) {
-		return uuid.equals(ownAccount) || modUsers.contains(uuid.toString().replace("-", ""));
+		String key = uuid.toString().replace("-", "");
+		return uuid.equals(ownAccount) || modUsers.contains(key) || seenModUsers.contains(key);
+	}
+
+	/**
+	 * Forgets remembered mod users who are no longer on the server. The backend only lists someone for a while after it
+	 * last heard from them, but anyone who hasn't logged out is still running the mod, so their icon stays until they leave.
+	 */
+	public void retainOnline(java.util.Collection<UUID> online) {
+		if (seenModUsers.isEmpty()) return;
+		java.util.Set<String> keys = new java.util.HashSet<>();
+		for (UUID id : online) keys.add(id.toString().replace("-", ""));
+		seenModUsers.retainAll(keys);
 	}
 
 	/** Every 30 seconds on the stats thread: send the heartbeat and refresh the list when they are due. */
@@ -354,6 +368,7 @@ public final class StatsClient {
 						users.add(id.getAsString());
 					}
 					modUsers = users;
+					seenModUsers.addAll(users);
 					lastUsersMillis = now;
 				}
 			}

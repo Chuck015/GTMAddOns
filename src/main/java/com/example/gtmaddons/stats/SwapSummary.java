@@ -69,7 +69,7 @@ public record SwapSummary(
 			mouse.add(r.mouseDeg());
 			if (r.overflickDeg() != null) over.add(r.overflickDeg());
 			if (r.speedBeforeBps() != null && r.speedAfterBps() != null && r.speedBeforeBps() > 0) {
-				kept.add(100.0 * r.speedAfterBps() / r.speedBeforeBps());
+				kept.add(Math.min(100.0, 100.0 * r.speedAfterBps() / r.speedBeforeBps()));
 			}
 		}
 		return new SwapSummary(records.size(), successes, failures, cancels,

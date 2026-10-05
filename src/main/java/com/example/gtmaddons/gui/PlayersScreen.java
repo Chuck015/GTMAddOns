@@ -167,6 +167,7 @@ public class PlayersScreen extends Screen {
 	private void selectView(int fights) {
 		filter = null;
 		viewFights = fights;
+		FightViews.set(fights);
 		notice = null;
 		load();
 	}
@@ -251,7 +252,7 @@ public class PlayersScreen extends Screen {
 	private void openPlayer(PlayerDetail player) {
 		status = "Loading " + player.name() + "...";
 		PlayerScreen.rememberTab(category);
-		stats.fetchPlayer(player.uuid(), 25, PlayerScreen.openingTab(null)).whenComplete((detail, error) -> client.execute(() -> {
+		stats.fetchPlayer(player.uuid(), FightViews.get(), PlayerScreen.openingTab(null)).whenComplete((detail, error) -> client.execute(() -> {
 			if (client.currentScreen != this) return;
 			if (error != null) {
 				status = "Couldn't load " + player.name() + ": " + Format.error(error);

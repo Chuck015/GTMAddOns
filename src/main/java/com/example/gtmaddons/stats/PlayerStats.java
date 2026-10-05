@@ -72,7 +72,8 @@ public final class PlayerStats {
 	public record GunStat(String category, String gun, long shots, long hits, long headshots, long kills, long lastUsed) {}
 
 	/** Air PvP swaps of one type (a swap type name, or null for failed/canceled attempts). */
-	public record AirSwapStat(String swapType, int total, int successes, int cancels, Double avgMs, Double bestMs) {}
+	public record AirSwapStat(String swapType, int total, int successes, int cancels, Double avgMs, Double bestMs,
+			Double speedBeforeBps, Double speedAfterBps, int momentumSwaps) {}
 
 	/**
 	 * Melee combo totals for one PvP category: enemy combos on you and how

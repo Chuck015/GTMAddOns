@@ -29,13 +29,9 @@ import java.util.function.Consumer;
  * 100, newest first - when, who against, win or loss, how long, which PvP -
  * with the ratings they had in it. Scrolls with the mouse wheel.
  *
- * Ratings come in two flavors, switched by the button beside the PvP filter:
- *   - This fight: the ratings from that fight's own numbers. A single fight
- *     rarely has enough shots, swaps or combos for every rating, so some show
- *     "-", and K/D is just a win or a loss.
- *   - Running N: the ratings over that fight and the N-1 before it in the
- *     same PvP (10, 25, 50 or 100) - what your ratings were going into and
- *     through it, on the same footing as the stats page.
+ * The ratings are the ones from that fight's own numbers. A single fight rarely has
+ * enough shots, swaps or combos for every rating, so some show "~" (no data, 50
+ * assumed), and K/D is just a win or a loss.
  *
  * Click a row for the ratings page behind it. Closes if you get combat-tagged.
  */
@@ -44,8 +40,6 @@ public class FightLogScreen extends Screen {
 	private static final int ROW = 13;
 	private static final int TABLE_WIDTH = 390;
 	private static final int TABLE_TOP = 62;
-	/** Ratings windows the mode button cycles through: 0 = this fight alone, then running over N fights. */
-	private static final int[] MODES = { 0, 10, 25, 50, 100 };
 
 	private final Screen parent;
 	private FightHistory history;
@@ -56,7 +50,6 @@ public class FightLogScreen extends Screen {
 	private String notice = null;
 	/** null = every PvP. */
 	private PvpCategory filter;
-	private int mode = 2;
 	private List<Row> rows = List.of();
 	private int scroll = 0;
 
@@ -74,14 +67,6 @@ public class FightLogScreen extends Screen {
 		rebuild();
 	}
 
-	private int window() {
-		return MODES[mode];
-	}
-
-	private String modeLabel() {
-		return window() == 0 ? "Ratings: this fight" : "Ratings: running " + window();
-	}
-
 	/** Works out every shown fight's ratings (cheap: at most 100 fights). */
 	private void rebuild() {
 		List<FightData> all = history.fights();
@@ -89,9 +74,7 @@ public class FightLogScreen extends Screen {
 		for (int i = 0; i < all.size(); i++) {
 			FightData fight = all.get(i);
 			if (filter != null && !filter.name().equals(fight.category())) continue;
-			Ratings.Result ratings = window() == 0
-					? FightStats.ratingsForFight(history, fight)
-					: FightStats.runningRatings(history, all, i, window());
+			Ratings.Result ratings = FightStats.ratingsForFight(history, fight);
 			out.add(new Row(i, fight, ratings));
 		}
 		rows = out;
@@ -100,10 +83,10 @@ public class FightLogScreen extends Screen {
 
 	@Override
 	protected void init() {
-		// PvP filter chips, then the ratings mode button.
-		int chip = 44, gap = 3, modeWidth = 130;
+		// PvP filter chips.
+		int chip = 44, gap = 3;
 		PvpCategory[] categories = PvpCategory.values();
-		int total = (categories.length + 1) * (chip + gap) + modeWidth + 6;
+		int total = (categories.length + 1) * (chip + gap) - gap;
 		int x = (width - total) / 2, y = 22;
 
 		ButtonWidget all = addDrawableChild(ButtonWidget.builder(Text.literal("All"), b -> setFilter(null))
@@ -116,13 +99,7 @@ public class FightLogScreen extends Screen {
 			button.active = filter != category;
 			x += chip + gap;
 		}
-		x += 6;
-		addDrawableChild(ButtonWidget.builder(Text.literal(modeLabel()), b -> {
-			mode = (mode + 1) % MODES.length;
-			rebuild();
-			clearAndInit();
-		}).dimensions(x, y, modeWidth, 20)
-				.build());
+
 
 		addDrawableChild(ButtonWidget.builder(ScreenTexts.BACK, b -> close())
 				.dimensions(width / 2 - 75, height - 28, 150, 20).build());
@@ -320,12 +297,9 @@ public class FightLogScreen extends Screen {
 		FightData fight = row.fight();
 		PvpCategory category = PvpCategory.fromName(fight.category());
 		if (category == null) return;
-		List<FightData> basis = window() == 0 ? List.of(fight) : FightStats.trailing(history.fights(), row.index(), window());
-		PlayerDetail detail = FightStats.detail(history, basis);
+		PlayerDetail detail = FightStats.detail(history, List.of(fight));
 		String vs = fight.opponent() != null ? " vs " + fight.opponent() : "";
-		Text subtitle = Text.literal(window() == 0
-				? (fight.won() ? "Won" : "Lost") + vs + " (" + Format.time(fight.endedAt()) + ")  ·  this fight alone"
-				: "Running: " + basis.size() + " " + category.label + " fights up to " + Format.time(fight.endedAt()) + vs);
+		Text subtitle = Text.literal((fight.won() ? "Won" : "Lost") + vs + " (" + Format.time(fight.endedAt()) + ")  ·  this fight alone");
 		client.setScreen(new InsightScreen(this, detail, category, Insight.RATING, subtitle, individualGuns));
 	}
 }

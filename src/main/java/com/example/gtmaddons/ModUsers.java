@@ -20,6 +20,17 @@ public final class ModUsers {
 
 	private ModUsers() {}
 
+	private static long nextPruneMillis = 0L;
+
+	/** Every couple of seconds: forget remembered mod users who left the server (see StatsClient.retainOnline). */
+	public static void onFrame(net.minecraft.client.MinecraftClient client) {
+		if (stats == null) return;
+		long now = System.currentTimeMillis();
+		if (now < nextPruneMillis) return;
+		nextPruneMillis = now + 2000L;
+		stats.retainOnline(client.getNetworkHandler() != null ? client.getNetworkHandler().getPlayerUuids() : java.util.List.<java.util.UUID>of());
+	}
+
 	public static void init(StatsClient statsClient, Settings modSettings) {
 		stats = statsClient;
 		settings = modSettings;

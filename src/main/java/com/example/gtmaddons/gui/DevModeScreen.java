@@ -13,9 +13,11 @@ import net.minecraft.util.Formatting;
 
 /**
  * The dev mode / QA mode menu (Settings > Dev mode, Settings > QA mode), opened
- * once the backend has approved this account. Same options for both: one
- * button per DevFilter to switch that output on or off (each mode keeps its
- * own choices), then the mode's own on/off button at the bottom. QA mode
+ * once the backend has approved this account. Same options for both: a row of
+ * tabs (Wing, JP, Ground, General, like the PVP settings) and, for the open
+ * tab, one button per DevFilter to switch that output on or off (each mode
+ * keeps its own choices), then All on / All off, and the mode's own on/off
+ * button at the bottom. QA mode
  * shows the same things but never writes the log file.
  *
  * Choices apply at once, even while the mode is on.
@@ -46,18 +48,29 @@ public class DevModeScreen extends Screen {
 		return qa ? mod.isQaModeOn() : mod.isDevModeOn();
 	}
 
+	/** The tab open; remembered, so coming back shows the same one. */
+	private static DevFilter.Group tab = DevFilter.Group.GENERAL;
+
 	private int columns() {
 		return width >= 480 ? 3 : 2;
 	}
 
-	private int rows() {
-		int n = DevFilter.values().length;
-		return (n + columns() - 1) / columns();
+	private static int filtersIn(DevFilter.Group group) {
+		int n = 0;
+		for (DevFilter filter : DevFilter.values()) if (filter.group == group) n++;
+		return n;
 	}
 
-	/** Filter grid, All on / All off, then the mode button and Back. */
+	/** Rows of the biggest tab: every tab reserves this much, so the buttons below stay put when you switch. */
+	private int rows() {
+		int most = 1;
+		for (DevFilter.Group group : DevFilter.Group.values()) most = Math.max(most, filtersIn(group));
+		return (most + columns() - 1) / columns();
+	}
+
+	/** Tabs, filter grid, All on / All off, then the mode button and Back. */
 	private int contentHeight() {
-		return rows() * ROW + 8 + ROW + 8 + ROW * 2;
+		return ROW + 6 + rows() * ROW + 8 + ROW + 8 + ROW * 2;
 	}
 
 	private int top() {
@@ -66,24 +79,39 @@ public class DevModeScreen extends Screen {
 
 	@Override
 	protected void init() {
-		DevFilter[] filters = DevFilter.values();
 		int cols = columns();
 		int colWidth = Math.min(150, (width - 30 - GAP * (cols - 1)) / cols);
 		int gridWidth = cols * colWidth + GAP * (cols - 1);
 		int left = (width - gridWidth) / 2;
 		int top = top();
 
-		for (int i = 0; i < filters.length; i++) {
-			DevFilter filter = filters[i];
+		// The tabs, side by side; the open one is greyed out.
+		int chip = 62;
+		int tx = width / 2 - (DevFilter.Group.values().length * (chip + GAP) - GAP) / 2;
+		for (DevFilter.Group group : DevFilter.Group.values()) {
+			ButtonWidget button = ButtonWidget.builder(Text.literal(group.label), b -> {
+				tab = group;
+				clearAndInit();
+			}).dimensions(tx, top, chip, 20).build();
+			button.active = group != tab;
+			addDrawableChild(button);
+			tx += chip + GAP;
+		}
+		int gridTop = top + ROW + 6;
+
+		int i = 0;
+		for (DevFilter filter : DevFilter.values()) {
+			if (filter.group != tab) continue;
 			int x = left + (i % cols) * (colWidth + GAP);
-			int y = top + (i / cols) * ROW;
+			int y = gridTop + (i / cols) * ROW;
+			i++;
 			addDrawableChild(ButtonWidget.builder(filterText(filter), b -> {
 				mod.setDevFilterOn(qa, filter, !mod.isDevFilterOn(qa, filter));
 				b.setMessage(filterText(filter));
 			}).dimensions(x, y, colWidth, 20).tooltip(Tooltip.of(Text.literal(filter.description))).build());
 		}
 
-		int y = top + rows() * ROW + 8;
+		int y = gridTop + rows() * ROW + 8;
 		int half = (BUTTON_WIDTH - GAP) / 2;
 		int x = width / 2 - BUTTON_WIDTH / 2;
 		addDrawableChild(ButtonWidget.builder(Text.literal("All on"), b -> setAll(true))
@@ -149,6 +177,9 @@ public class DevModeScreen extends Screen {
 		context.drawCenteredTextWithShadow(textRenderer,
 				Text.literal("Choose what to show, then turn " + modeName() + " on. Hover an option to see what it does."),
 				width / 2, top - 14, Ui.MUTED);
+		if (filtersIn(tab) == 0) {
+			context.drawCenteredTextWithShadow(textRenderer, Text.literal("Nothing here yet"), width / 2, top + ROW + 10, 0xFF888888);
+		}
 		if (status != null) {
 			context.drawCenteredTextWithShadow(textRenderer, Text.literal(status), width / 2, top + contentHeight() + 2, 0xFFFFFF55);
 		}
