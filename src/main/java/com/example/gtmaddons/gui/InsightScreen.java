@@ -368,17 +368,7 @@ public class InsightScreen extends Screen {
 		}
 		right.add(new Section("Momentum", momentum));
 
-		List<Row> mouse = new ArrayList<>();
-		mouse.add(new Stat("Total", Format.degrees(avg.mouseDeg()), Ui.TEXT));
-		mouse.add(new Stat("Approach (needed)", Format.degrees(avg.approachDeg()) + " (" + Format.degrees(avg.neededDeg()) + ")", Ui.TEXT));
-		Double efficiency = avg.efficiency();
-		mouse.add(efficiency != null
-				? new Meter("Efficiency", Format.percent(efficiency), Ui.rateColor(efficiency), efficiency / 100)
-				: new Stat("Efficiency", "-", Ui.TEXT));
-		mouse.add(new Stat("Backward", Format.degrees(avg.awayDeg()), Ui.TEXT));
-		mouse.add(new Stat("After touching slot (peak)", Format.degrees(avg.overflickDeg()) + " (" + Format.degrees(avg.overflickPeakDeg()) + ")", Ui.TEXT));
-		mouse.add(new Stat("After wing in hotbar", Format.degrees(avg.afterDeg()), Ui.TEXT));
-		right.add(new Section("Average mouse movement", mouse));
+		mouseSection(avg, "After wing in hotbar");
 
 		List<Row> recent = new ArrayList<>();
 		if (detail.recent().isEmpty()) recent.add(new Note("None yet.", Ui.MUTED));
@@ -393,6 +383,21 @@ public class InsightScreen extends Screen {
 			});
 		}
 		right.add(new Section("Recent swaps", recent));
+	}
+
+	/** The "Average mouse movement" section (Wing and Air swaps); afterLabel names the movement after the swap is done. */
+	private void mouseSection(Averages avg, String afterLabel) {
+		List<Row> mouse = new ArrayList<>();
+		mouse.add(new Stat("Total", Format.degrees(avg.mouseDeg()), Ui.TEXT));
+		mouse.add(new Stat("Approach (needed)", Format.degrees(avg.approachDeg()) + " (" + Format.degrees(avg.neededDeg()) + ")", Ui.TEXT));
+		Double efficiency = avg.efficiency();
+		mouse.add(efficiency != null
+				? new Meter("Efficiency", Format.percent(efficiency), Ui.rateColor(efficiency), efficiency / 100)
+				: new Stat("Efficiency", "-", Ui.TEXT));
+		mouse.add(new Stat("Backward", Format.degrees(avg.awayDeg()), Ui.TEXT));
+		mouse.add(new Stat("After touching slot (peak)", Format.degrees(avg.overflickDeg()) + " (" + Format.degrees(avg.overflickPeakDeg()) + ")", Ui.TEXT));
+		mouse.add(new Stat(afterLabel, Format.degrees(avg.afterDeg()), Ui.TEXT));
+		right.add(new Section("Average mouse movement", mouse));
 	}
 
 	private static Row stepRow(String label, Double ms, Double total) {
@@ -470,6 +475,7 @@ public class InsightScreen extends Screen {
 		}
 		right.add(new Section("Swap types used", use));
 		right.add(new Section("Speed per type", speed));
+		if (detail.airAvg() != null) mouseSection(detail.airAvg(), "After swap is done");
 	}
 
 	/** Melee: combo share, breaks, first hits and the melee rating. */
@@ -562,8 +568,7 @@ public class InsightScreen extends Screen {
 			if (s == null || s.avgBps() == null) {
 				rows.add(new Note("No shots yet.", Ui.MUTED));
 			} else {
-				double score = Math.max(0, Math.min(100, 100.0 * (s.avgBps() - RatingWeights.MOVEMENT_FLOOR_BPS)
-						/ (RatingWeights.MOVEMENT_CEILING_BPS - RatingWeights.MOVEMENT_FLOOR_BPS)));
+				double score = RatingWeights.movementScore(s.gun(), s.avgBps());
 				rows.add(new Meter("Score", String.format("%.0f", score), Ui.scoreColor(score), score / 100));
 				rows.add(new Stat("Average", Format.bps(s.avgBps()), Ui.TEXT));
 				rows.add(new Stat("Fastest", Format.bps(s.bestBps()), Ui.GOOD));

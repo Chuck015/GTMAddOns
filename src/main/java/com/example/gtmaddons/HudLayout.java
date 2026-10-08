@@ -47,16 +47,17 @@ public final class HudLayout {
 			return name().toLowerCase(java.util.Locale.ROOT);
 		}
 
-		/** Default anchor in pixels: where these were drawn before they could be moved. */
+		/** Default anchor in pixels for a screen of w x h: where the element sits until the player moves it. */
 		int[] defaultAnchor(int w, int h) {
 			return switch (this) {
-				case SWAP_TIMER -> new int[] { w / 2, h - 72 };   // where the action bar sits
+				// Centered low, above the hotbar and its hearts (the swap timer where the action bar sits); the combo lines share a spot
+				// (only one shows at a time) a little above it. The glide and combat lines stack under the crosshair, out of the way.
+				case SWAP_TIMER -> new int[] { w / 2, (int) (h * 0.846) };
 				case LAST_SWAP -> new int[] { 6, 6 };
-				case BOOST_ANGLE -> new int[] { w / 2, h / 2 + 12 };
-				case BOOST_HEIGHT -> new int[] { w / 2, h / 2 + 22 };
-				case COMBO_LOCK -> new int[] { w / 2, h / 2 - 34 };
-				case COMBO_HIT -> new int[] { w / 2, h / 2 - 24 };
-				case COMBAT_TIMER -> new int[] { w / 2, h / 2 + 34 };
+				case BOOST_ANGLE -> new int[] { w / 2, (int) (h * 0.56) };
+				case BOOST_HEIGHT -> new int[] { w / 2, (int) (h * 0.59) };
+				case COMBO_LOCK, COMBO_HIT -> new int[] { w / 2, (int) (h * 0.80) };
+				case COMBAT_TIMER -> new int[] { w / 2, (int) (h * 0.63) };
 			};
 		}
 	}

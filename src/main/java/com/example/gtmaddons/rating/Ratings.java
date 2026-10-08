@@ -30,7 +30,7 @@ import java.util.Map;
  *             Air - swap score and momentum kept, like Wing, on the same swap bounds.
  *             Ground - speed right after movement gun
  *             shots, from MOVEMENT_FLOOR_BPS (sprinting) = 0 to
- *             MOVEMENT_CEILING_BPS = 100.
+ *             each gun's own ceiling = 100 (RatingWeights.movementCeiling).
  *   Melee:    JP's second rating in Movement's place (and a part of Air's
  *             Overall) - enemy combos you
  *             broke, your combos you kept, and your share of all combos
@@ -274,7 +274,7 @@ public final class Ratings {
 	/**
 	 * Speed right after movement gun shots: each gun's average scored from
 	 * MOVEMENT_FLOOR_BPS (sprinting, the shot added nothing) = 0 to
-	 * MOVEMENT_CEILING_BPS = 100, then averaged by shots. Null under
+	 * that gun's own ceiling = 100 (Heavy Revolver > Sawed-off > Pump), then averaged by shots. Null under
 	 * MIN_MOVEMENT_SHOTS.
 	 */
 	static Double movementGunScore(PlayerDetail detail, List<String> breakdown) {
@@ -288,8 +288,7 @@ public final class Ratings {
 		List<String> perGun = new ArrayList<>();
 		for (MovementGunStat g : guns) {
 			if (g.avgBps() == null) continue;
-			double score = clamp(100.0 * (g.avgBps() - RatingWeights.MOVEMENT_FLOOR_BPS)
-					/ (RatingWeights.MOVEMENT_CEILING_BPS - RatingWeights.MOVEMENT_FLOOR_BPS));
+			double score = RatingWeights.movementScore(g.gun(), g.avgBps());
 			sum += score * g.shots();
 			perGun.add(String.format("    %s: %.0f (%d shots, avg %.1f b/s)", g.gun(), score, g.shots(), g.avgBps()));
 		}

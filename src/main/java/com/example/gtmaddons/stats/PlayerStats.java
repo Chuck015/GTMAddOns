@@ -30,7 +30,9 @@ public final class PlayerStats {
 			/** The last few fights in the view, newest first (null from older backends). */
 			List<RecentFight> recentFights,
 			/** Ground PvP movement gun shots, one per gun (null from older backends). */
-			List<MovementGunStat> movementGuns
+			List<MovementGunStat> movementGuns,
+			/** Mouse movement and step averages over the successful Air swaps (null from older backends, or without any). */
+			Averages airAvg
 	) {}
 
 	/** Speed (horizontal blocks/s) right after a movement gun's shots: how many, the average and the best. */
@@ -87,6 +89,24 @@ public final class PlayerStats {
 
 	/** Who the backend thinks we are: dev = allowed dev/QA mode, admin = allowed admin mode (deleting stats data). */
 	public record Me(String uuid, String name, boolean dev, boolean admin) {}
+
+	/** What an admin account sees about a player (GET /admin/player-info); shown by AdminPlayerInfoScreen. modVersion is null if never recorded. */
+	public record AdminPlayerInfo(String uuid, String name, long firstSeen, long lastSeen, String modVersion, boolean online, boolean dev,
+			boolean admin, long fights, long kills, long deaths, java.util.Map<String, Long> fightsByCategory, Long lastFightAt, long swaps,
+			java.util.List<Flag> flags) {}
+
+	/** One out-of-the-norm stat in AdminPlayerInfo: level is "warn" or "note". */
+	public record Flag(String level, String text) {}
+
+	/** What a flag needs before it shows (GET /admin/flag-rules); listed by AdminPlayerInfoScreen. */
+	public record FlagRule(String title, String requirement) {}
+
+	public record FlagRules(java.util.List<FlagRule> rules) {}
+
+	/** A player with at least one warning flag (GET /admin/flagged), with all their flags. */
+	public record FlaggedPlayer(String uuid, String name, java.util.List<Flag> flags) {}
+
+	public record FlaggedPlayers(java.util.List<FlaggedPlayer> players, long computedAt) {}
 
 	// ---- Raw fights (GET /players/:uuid/fights) ----
 	// What the fight log, per-fight ratings and custom filters are built from; see FightStats.

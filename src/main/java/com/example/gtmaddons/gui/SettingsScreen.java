@@ -20,11 +20,10 @@ import net.minecraft.util.Formatting;
  *           Wing    cobweb transparency (a slider), boost angle, boost height, swap recording,
  *                   advanced swap info, swap timer (opens SwapTimerScreen)
  *           JP      better combo timers, jetpack sneak animation, hide jetpack particles
- *           Ground  (nothing yet)
  *           General hit sound, combat timer (a HUD line you can move)
  *   QOL   sounds, better near
  *   MISC  latency tester, GTMAddOns icon, fish cat, then dev mode / QA mode side by
- *         side and admin mode under them
+ *         side and admin mode under them (with its Player info... button while it is on)
  */
 public class SettingsScreen extends Screen {
 
@@ -59,7 +58,7 @@ public class SettingsScreen extends Screen {
 
 	/** The PVP page's tabs. The one open is remembered, so coming back shows the same one. */
 	private enum PvpTab {
-		WING("Wing"), JP("JP"), GROUND("Ground"), GENERAL("General");
+		WING("Wing"), JP("JP"), GENERAL("General");
 
 		final String label;
 
@@ -151,7 +150,6 @@ public class SettingsScreen extends Screen {
 				y = toggle(x, y, "Jetpack sneak animation", mod::isOldSneakingOn, mod::setOldSneakingOn);
 				toggle(x, y, "Hide jetpack particles", mod::isHideJetpackParticlesOn, mod::setHideJetpackParticlesOn);
 			}
-			case GROUND -> labels.add(new Object[] { "Nothing here yet", y + 4, NOTE_COLOR });
 			case GENERAL -> {
 				addDrawableChild(ButtonWidget.builder(Text.literal("Hit sound..."), b -> client.setScreen(new HitSoundScreen(this, mod)))
 						.dimensions(x, y, BUTTON_WIDTH, 20).build());
@@ -186,6 +184,12 @@ public class SettingsScreen extends Screen {
 		y += ROW;
 		addDrawableChild(ButtonWidget.builder(onOff("Admin mode", mod.isAdminModeOn()), b -> toggleAdminMode())
 				.dimensions(x, y, BUTTON_WIDTH, 20).build());
+		if (mod.isAdminModeOn()) {
+			// Admin mode's own tools sit under its switch.
+			y += ROW;
+			addDrawableChild(ButtonWidget.builder(Text.literal("Player info..."), b -> client.setScreen(new AdminPlayerInfoScreen(this, mod)))
+					.dimensions(x, y, BUTTON_WIDTH, 20).build());
+		}
 		return y + ROW - GAP;
 	}
 
@@ -204,7 +208,7 @@ public class SettingsScreen extends Screen {
 			case HUB -> ROW + GAP + 4 * ROW;
 			case PVP -> ROW + GAP / 2 + PVP_ROWS * ROW;
 			case QOL -> 2 * ROW;
-			case MISC -> 3 * ROW + GAP + 2 * ROW - GAP;
+			case MISC -> 3 * ROW + GAP + 2 * ROW - GAP + (mod.isAdminModeOn() ? ROW : 0);
 		};
 		return rows + GAP + 20;
 	}

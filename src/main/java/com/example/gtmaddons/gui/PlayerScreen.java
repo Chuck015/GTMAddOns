@@ -71,6 +71,8 @@ public class PlayerScreen extends Screen {
 	private boolean needsRefresh = false;
 	/** Told after an admin deletes data here, so the page behind (the leaderboard) can reload. */
 	private Runnable onAdminChange = () -> {};
+	/** The mod, for admin-only buttons on another player's page (mod is null there). */
+	private GTMAddOnsClient adminMod = null;
 	/** Every gun on its own instead of grouped by type (Rifle, Sniper, SMG...). */
 	private static boolean showIndividualGuns = false;
 	/** How far the Overview is scrolled down, when it doesn't fit. */
@@ -107,6 +109,12 @@ public class PlayerScreen extends Screen {
 		views.put(shownKey, detail);
 	}
 
+	/** Lets the admin Flags button work on another player's page. */
+	public PlayerScreen withAdminMod(GTMAddOnsClient adminMod) {
+		this.adminMod = adminMod;
+		return this;
+	}
+
 	private static String key(PvpCategory category, int fights) {
 		return category.name() + "|" + fights;
 	}
@@ -139,6 +147,11 @@ public class PlayerScreen extends Screen {
 		}
 		addDrawableChild(ButtonWidget.builder(ScreenTexts.BACK, b -> close())
 				.dimensions(width / 2 - 75, height - 28, 150, 20).build());
+		GTMAddOnsClient flagsMod = mod != null ? mod : adminMod;
+		if (AdminMode.isOn() && flagsMod != null) {
+			addDrawableChild(ButtonWidget.builder(Text.literal("Flags"), b -> client.setScreen(new AdminPlayerInfoScreen(this, flagsMod, detail.name())))
+					.dimensions(width - 182, 4, 56, 16).build());
+		}
 		if (AdminMode.isOn()) {
 			addDrawableChild(ButtonWidget.builder(Text.literal("Admin: delete data").formatted(Formatting.RED), b -> confirmDeleteAll())
 					.dimensions(width - 122, 4, 118, 16)
@@ -203,8 +216,8 @@ public class PlayerScreen extends Screen {
 				.build());
 
 		y = height - 52;
-		int logWidth = 80, gunsWidth = 140;
-		int row2 = logWidth + gap + gunsWidth;
+		int logWidth = 80, gunsWidth = 140, rawWidth = 80;
+		int row2 = logWidth + gap + gunsWidth + gap + rawWidth;
 		x = (width - row2) / 2;
 		addDrawableChild(ButtonWidget.builder(Text.literal("Fight log"), b -> withHistory(this::openLog))
 				.dimensions(x, y, logWidth, 20)
@@ -213,6 +226,9 @@ public class PlayerScreen extends Screen {
 			showIndividualGuns = !showIndividualGuns;
 			clearAndInit();
 		}).dimensions(x + logWidth + gap, y, gunsWidth, 20)
+				.build());
+		addDrawableChild(ButtonWidget.builder(Text.literal("Raw info"), b -> client.setScreen(new RawInfoScreen(this, stats, uuid, detail.name())))
+				.dimensions(x + logWidth + gap + gunsWidth + gap, y, rawWidth, 20)
 				.build());
 	}
 

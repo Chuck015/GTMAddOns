@@ -48,6 +48,37 @@ final class Ui {
 		context.drawTextWithShadow(font, text, right - font.getWidth(text), y, color);
 	}
 
+	/** Word-wraps text to lines no wider than width (a single long word stays on its own line). */
+	static java.util.List<String> wrap(TextRenderer font, String text, int width) {
+		java.util.List<String> lines = new java.util.ArrayList<>();
+		StringBuilder line = new StringBuilder();
+		for (String word : text.split(" ")) {
+			String tryLine = line.length() == 0 ? word : line + " " + word;
+			if (line.length() > 0 && font.getWidth(tryLine) > width) {
+				lines.add(line.toString());
+				line = new StringBuilder(word);
+			} else {
+				line = new StringBuilder(tryLine);
+			}
+		}
+		if (line.length() > 0) lines.add(line.toString());
+		return lines;
+	}
+
+	/** Cuts a line into pieces no wider than width (at any character, so long unbroken text such as JSON fits too). */
+	static java.util.List<String> chunks(TextRenderer font, String text, int width) {
+		java.util.List<String> out = new java.util.ArrayList<>();
+		String rest = text;
+		while (!rest.isEmpty()) {
+			String head = font.trimToWidth(rest, Math.max(1, width));
+			if (head.isEmpty()) head = rest.substring(0, 1);
+			out.add(head);
+			rest = rest.substring(head.length());
+		}
+		if (out.isEmpty()) out.add("");
+		return out;
+	}
+
 	/** Cuts text to fit width, ending in "..." if it had to. */
 	static String fit(TextRenderer font, String text, int width) {
 		if (font.getWidth(text) <= width) return text;

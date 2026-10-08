@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Toggles that should survive a restart, saved to config/gtmaddons.json.
+ * Toggles that should survive a restart, saved to config/gtmaddons.json. A new install starts with every feature off.
  * Dev mode isn't saved - it needs an access check with the backend each
  * time it's turned on.
  */
@@ -27,23 +27,23 @@ public final class Settings {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
 	/** Swap time in the action bar. */
-	public boolean showSwapTimer = true;
+	public boolean showSwapTimer = false;
 	/** "Last Swap" text in the top-left corner. */
-	public boolean cornerSwapText = true;
+	public boolean cornerSwapText = false;
 	/** Advanced swap info: full breakdown in chat after each swap. */
 	public boolean swapDebug = false;
 	/** Latency tester: gun and wing boost response times in chat (see LatencyTester). */
 	public boolean latencyTester = false;
 	/** Live Combo'd and hit-again timers in place of GTM's frozen messages (see ComboTracker). */
-	public boolean comboTimer = true;
+	public boolean comboTimer = false;
 	/** Look angle under the crosshair while gliding, green when a boost would work (see BoostAngleHud). */
-	public boolean boostAngle = true;
+	public boolean boostAngle = false;
 	/** Height under the crosshair while gliding, green when low enough to boost (see BoostHeightHud). */
-	public boolean boostHeight = true;
+	public boolean boostHeight = false;
 	/** /near's reply as a sorted list, one player per line, in place of GTM's one long line (see NearList). */
-	public boolean betterNear = true;
+	public boolean betterNear = false;
 	/** An icon after the name of players who run GTMAddOns (tab list and nametags). */
-	public boolean showModUsers = true;
+	public boolean showModUsers = false;
 
 	/** A Start / Stop recording button beside the inventory for the swap recording (SwapSession). */
 	public boolean swapRecordButton = false;

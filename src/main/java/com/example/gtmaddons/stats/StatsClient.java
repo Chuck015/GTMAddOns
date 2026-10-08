@@ -91,7 +91,7 @@ public final class StatsClient {
 			return;
 		}
 		worker.scheduleWithFixedDelay(this::flush, FLUSH_INTERVAL_SECONDS, FLUSH_INTERVAL_SECONDS, TimeUnit.SECONDS);
-		worker.scheduleWithFixedDelay(this::presenceTick, 20, 30, TimeUnit.SECONDS);
+		worker.scheduleWithFixedDelay(this::presenceTick, 20, 10, TimeUnit.SECONDS);
 	}
 
 	/**
@@ -166,6 +166,46 @@ public final class StatsClient {
 	/** Who the backend thinks we are, including whether we're allowed dev mode or admin mode. */
 	public CompletableFuture<PlayerStats.Me> fetchMe() {
 		return get("/me", PlayerStats.Me.class);
+	}
+
+	/** Admin mode: what the backend knows about a player, by name. Fails with HTTP 403 if this account is not an admin, 404 if unknown. */
+	public CompletableFuture<PlayerStats.AdminPlayerInfo> fetchAdminPlayerInfo(String name) {
+		return get("/admin/player-info?name=" + java.net.URLEncoder.encode(name, java.nio.charset.StandardCharsets.UTF_8), PlayerStats.AdminPlayerInfo.class);
+	}
+
+	/** Admin mode: every player with a warning flag (the backend keeps the list for 15 minutes). */
+	public CompletableFuture<PlayerStats.FlaggedPlayers> fetchAdminFlagged() {
+		return get("/admin/flagged", PlayerStats.FlaggedPlayers.class);
+	}
+
+	/** Admin mode: the minimum requirements of every flag, in words. */
+	public CompletableFuture<PlayerStats.FlagRules> fetchAdminFlagRules() {
+		return get("/admin/flag-rules", PlayerStats.FlagRules.class);
+	}
+
+	/**
+	 * A player's complete stored data as plain lines (GET /players/:uuid/raw, see RawInfo). Asks for gzip: the reply is long and
+	 * repeats itself, so this is a fraction of the size on the wire.
+	 */
+	public CompletableFuture<java.util.List<String>> fetchRaw(String uuid) {
+		CompletableFuture<java.util.List<String>> future = new CompletableFuture<>();
+		if (!isConfigured()) {
+			future.completeExceptionally(new IOException("stats backend isn't configured"));
+			return future;
+		}
+		UUID account = currentAccount();
+		worker.execute(() -> {
+			try {
+				if (account == null) throw new IOException("no Minecraft account signed in");
+				nextLoginAttemptMillis = 0;
+				HttpResponse<String> response = authedRequest(account, "GET", "/players/" + uuid + "/raw", null, true);
+				if (response.statusCode() != 200) throw new IOException("HTTP " + response.statusCode() + errorSuffix(response.body()));
+				future.complete(RawInfo.lines(GSON.fromJson(response.body(), JsonObject.class)));
+			} catch (Throwable e) {
+				future.completeExceptionally(e);
+			}
+		});
+		return future;
 	}
 
 	private <T> CompletableFuture<T> get(String path, Class<T> type) {
@@ -256,6 +296,9 @@ public final class StatsClient {
 		body.addProperty("outcome", fight.outcome());
 		body.addProperty("category", fight.category().name());
 		if (fight.opponent() != null) body.addProperty("opponent", fight.opponent());
+		if (fight.opponentCategory() != null) body.addProperty("opponent_category", fight.opponentCategory());
+		if (fight.opponentGear() != null) body.addProperty("opponent_gear", fight.opponentGear());
+		if (fight.movementInput() != null) body.add("movement_input", fight.movementInput().toJson());
 		body.add("swaps", GSON.toJsonTree(fight.swaps()));
 		body.add("guns", GSON.toJsonTree(List.copyOf(guns.values())));
 		body.add("combos", GSON.toJsonTree(List.copyOf(combos.values())));
@@ -319,38 +362,65 @@ public final class StatsClient {
 
 	// ---- Who runs the mod (the icon next to their name, see ModUsers) ----
 
-	/** How often to tell the backend this player is running the mod, and how often to ask who else is. */
-	private static final long HEARTBEAT_MS = 15 * 60_000L, USERS_REFRESH_MS = 5 * 60_000L;
-	private volatile java.util.Set<String> modUsers = java.util.Set.of();
-	/** Everyone the backend has listed since they joined: kept until they leave the server (see retainOnline). */
-	private final java.util.Set<String> seenModUsers = java.util.concurrent.ConcurrentHashMap.newKeySet();
+	/** How often to tell the backend this player is running the mod. */
+	private static final long HEARTBEAT_MS = 15 * 60_000L;
+	/**
+	 * When to ask the backend whether a player runs the mod: right after we join the server for the players already on it, and
+	 * JOIN_CHECK_DELAY_MS after someone else joins, so their own mod has time to announce itself first. Each player is asked about once.
+	 */
+	private static final long FIRST_CHECK_DELAY_MS = 3_000L, JOIN_CHECK_DELAY_MS = 20_000L, INITIAL_WINDOW_MS = 10_000L;
+	private static final int CHECK_BATCH = 90;
 	private volatile boolean showUsers = true;
 	private volatile UUID ownAccount;
-	private long lastHeartbeatMillis = 0L, lastUsersMillis = 0L;
+	private volatile long lastHeartbeatMillis = 0L;
+	/** Players the check found running the mod: they keep the icon until they leave the server. */
+	private final java.util.Set<String> confirmedModUsers = java.util.concurrent.ConcurrentHashMap.newKeySet();
+	/** Players already asked about (found or not): not asked again until they leave and come back. */
+	private final java.util.Set<String> checkedPlayers = java.util.concurrent.ConcurrentHashMap.newKeySet();
+	/** Players waiting for their check: undashed uuid -> when to ask. */
+	private final java.util.Map<String, Long> pendingChecks = new java.util.concurrent.ConcurrentHashMap<>();
+	private boolean hadPlayers = false;
+	private long initialUntilMillis = 0L;
 
-	/** Off: the list of users is not fetched (the heartbeat is still sent, so others can see you). */
+	/** Off: nobody is checked (the heartbeat is still sent, so others can see you). */
 	public void setShowUsers(boolean on) {
 		showUsers = on;
 	}
 
-	/** Whether this player runs the mod: you always do; others once the backend lists them. */
+	/** Whether this player runs the mod: you always do; others once the check found them. */
 	public boolean isModUser(UUID uuid) {
-		String key = uuid.toString().replace("-", "");
-		return uuid.equals(ownAccount) || modUsers.contains(key) || seenModUsers.contains(key);
+		return uuid.equals(ownAccount) || confirmedModUsers.contains(uuid.toString().replace("-", ""));
 	}
 
 	/**
-	 * Forgets remembered mod users who are no longer on the server. The backend only lists someone for a while after it
-	 * last heard from them, but anyone who hasn't logged out is still running the mod, so their icon stays until they leave.
+	 * Called every couple of seconds with everyone on the server (the tab list). Forgets players who left, and queues a check for each
+	 * new one. The first time the list fills (we just joined) the mod also announces itself to the backend at once.
 	 */
-	public void retainOnline(java.util.Collection<UUID> online) {
-		if (seenModUsers.isEmpty()) return;
+	public void updateOnline(java.util.Collection<UUID> online) {
+		long now = System.currentTimeMillis();
 		java.util.Set<String> keys = new java.util.HashSet<>();
 		for (UUID id : online) keys.add(id.toString().replace("-", ""));
-		seenModUsers.retainAll(keys);
+		boolean joined = !hadPlayers && !keys.isEmpty();
+		hadPlayers = !keys.isEmpty();
+		if (joined) {
+			// Joining a server: also look for a new mod version (once per join, see Updater.onJoin).
+			Updater.INSTANCE.onJoin();
+			lastHeartbeatMillis = 0L;
+			initialUntilMillis = now + INITIAL_WINDOW_MS;
+		}
+		confirmedModUsers.retainAll(keys);
+		checkedPlayers.retainAll(keys);
+		pendingChecks.keySet().retainAll(keys);
+		if (!showUsers) return;
+		UUID account = ownAccount;
+		String own = account != null ? account.toString().replace("-", "") : null;
+		for (String key : keys) {
+			if (key.equals(own) || checkedPlayers.contains(key) || pendingChecks.containsKey(key)) continue;
+			pendingChecks.put(key, now + (now < initialUntilMillis ? FIRST_CHECK_DELAY_MS : JOIN_CHECK_DELAY_MS));
+		}
 	}
 
-	/** Every 30 seconds on the stats thread: send the heartbeat and refresh the list when they are due. */
+	/** Every 10 seconds on the stats thread: send the heartbeat when due, and ask about the players whose check is due. */
 	private void presenceTick() {
 		try {
 			UUID account = currentAccount();
@@ -360,16 +430,26 @@ public final class StatsClient {
 			if (now - lastHeartbeatMillis >= HEARTBEAT_MS) {
 				if (authedRequest(account, "POST", "/presence", "{}").statusCode() == 200) lastHeartbeatMillis = now;
 			}
-			if (showUsers && now - lastUsersMillis >= USERS_REFRESH_MS) {
-				HttpResponse<String> response = authedRequest(account, "GET", "/users", null);
-				if (response.statusCode() == 200) {
-					java.util.Set<String> users = new java.util.HashSet<>();
-					for (com.google.gson.JsonElement id : com.google.gson.JsonParser.parseString(response.body()).getAsJsonObject().getAsJsonArray("uuids")) {
-						users.add(id.getAsString());
-					}
-					modUsers = users;
-					seenModUsers.addAll(users);
-					lastUsersMillis = now;
+			if (!showUsers || pendingChecks.isEmpty()) return;
+			com.google.gson.JsonArray due = new com.google.gson.JsonArray();
+			java.util.List<String> asked = new java.util.ArrayList<>();
+			for (java.util.Map.Entry<String, Long> entry : pendingChecks.entrySet()) {
+				if (entry.getValue() <= now && asked.size() < CHECK_BATCH) {
+					asked.add(entry.getKey());
+					due.add(entry.getKey());
+				}
+			}
+			if (asked.isEmpty()) return;
+			JsonObject body = new JsonObject();
+			body.add("uuids", due);
+			HttpResponse<String> response = authedRequest(account, "POST", "/users/check", body.toString());
+			if (response.statusCode() == 200) {
+				for (com.google.gson.JsonElement id : com.google.gson.JsonParser.parseString(response.body()).getAsJsonObject().getAsJsonArray("uuids")) {
+					confirmedModUsers.add(id.getAsString());
+				}
+				for (String key : asked) {
+					pendingChecks.remove(key);
+					checkedPlayers.add(key);
 				}
 			}
 		} catch (Exception e) {
@@ -378,13 +458,17 @@ public final class StatsClient {
 	}
 
 	private HttpResponse<String> authedRequest(UUID account, String method, String path, String jsonBody) throws Exception {
+		return authedRequest(account, method, path, jsonBody, false);
+	}
+
+	private HttpResponse<String> authedRequest(UUID account, String method, String path, String jsonBody, boolean gzip) throws Exception {
 		ensureLoggedIn(account);
-		HttpResponse<String> response = send(method, path, jsonBody, token);
+		HttpResponse<String> response = send(method, path, jsonBody, token, gzip);
 		if (response.statusCode() == 401) {
 			// Session expired - log in again once and retry.
 			token = null;
 			ensureLoggedIn(account);
-			response = send(method, path, jsonBody, token);
+			response = send(method, path, jsonBody, token, gzip);
 		}
 		return response;
 	}
@@ -415,9 +499,19 @@ public final class StatsClient {
 		Session session = client.getSession();
 		if (!uuid.equals(session.getUuidOrNull())) throw new IOException("account changed while logging in");
 
-		PlayerKeyPair keyPair = client.getProfileKeys().fetchKeyPair().get(15, TimeUnit.SECONDS)
-				.orElseThrow(() -> new IOException(explainMissingKey(session)));
-		PlayerPublicKey.PublicKeyData keyData = keyPair.publicKey().data();
+		// The game's own key if it has one; else the one Mojang issues for the account (see mojangKey).
+		LoginKey key = null;
+		try {
+			java.util.Optional<PlayerKeyPair> own = client.getProfileKeys().fetchKeyPair().get(15, TimeUnit.SECONDS);
+			if (own.isPresent()) {
+				PlayerKeyPair keyPair = own.get();
+				PlayerPublicKey.PublicKeyData keyData = keyPair.publicKey().data();
+				key = new LoginKey(keyPair.privateKey(), keyData.key().getEncoded(), keyData.expiresAt().toEpochMilli(), keyData.keySignature());
+			}
+		} catch (Exception e) {
+			LOGGER.info("GTMAddOns: the game's profile key wasn't available: {}", e.toString());
+		}
+		if (key == null) key = mojangKey(session, uuid);
 
 		HttpResponse<String> challenge = send("POST", "/auth/challenge", "{}", null);
 		if (challenge.statusCode() != 200) throw new IOException("challenge failed: HTTP " + challenge.statusCode());
@@ -425,7 +519,7 @@ public final class StatsClient {
 
 		String undashedUuid = uuid.toString().replace("-", "");
 		Signature signer = Signature.getInstance("SHA256withRSA");
-		signer.initSign(keyPair.privateKey());
+		signer.initSign(key.privateKey());
 		signer.update(loginMessage(serverId, undashedUuid).getBytes(StandardCharsets.UTF_8));
 
 		Base64.Encoder base64 = Base64.getEncoder();
@@ -433,13 +527,75 @@ public final class StatsClient {
 		body.addProperty("username", session.getUsername());
 		body.addProperty("uuid", undashedUuid);
 		body.addProperty("server_id", serverId);
-		body.addProperty("public_key", base64.encodeToString(keyData.key().getEncoded()));
-		body.addProperty("expires_at", keyData.expiresAt().toEpochMilli());
-		body.addProperty("key_signature", base64.encodeToString(keyData.keySignature()));
+		body.addProperty("public_key", base64.encodeToString(key.publicKey()));
+		body.addProperty("expires_at", key.expiresAtMs());
+		body.addProperty("key_signature", base64.encodeToString(key.keySignature()));
 		body.addProperty("signature", base64.encodeToString(signer.sign()));
 		HttpResponse<String> login = send("POST", "/auth/login", body.toString(), null);
 		if (login.statusCode() != 200) throw new IOException("login failed: HTTP " + login.statusCode() + " " + login.body());
 		return GSON.fromJson(login.body(), JsonObject.class).get("token").getAsString();
+	}
+
+	/** What Mojang's certificate service answering with this HTTP status means, in one line for the player. */
+	private static String explainStatus(int status) {
+		return switch (status) {
+			case 200 -> "Mojang has a key for you but the game didn't load it - restart Lunar, then delete the 'profilekeys' folder if it persists";
+			case 401 -> "Your Minecraft login expired - log out and back in to your account in Lunar, then try again";
+			case 403 -> "Mojang won't give this account a chat key - check Xbox privacy settings (multiplayer and chat allowed)";
+			case 429 -> "Mojang is limiting key requests right now - wait a few minutes and try again";
+			default -> "Mojang's key service answered HTTP " + status + " - try again later";
+		};
+	}
+
+	/** What the login needs from a profile key: the private key to sign with, the public key (DER), its expiry and Mojang's signature on it. */
+	private record LoginKey(java.security.PrivateKey privateKey, byte[] publicKey, long expiresAtMs, byte[] keySignature) {}
+
+	/** The key last fetched from Mojang, kept until an hour before it expires so a retry doesn't ask Mojang again. */
+	private LoginKey mojangKeyCache;
+	private UUID mojangKeyAccount;
+
+	/**
+	 * The profile key Mojang issues for this account (POST api.minecraftservices.com/player/certificates with the account's own
+	 * access token, which goes only to Mojang). Used when the game has none loaded. Throws with advice if Mojang won't give one.
+	 */
+	private LoginKey mojangKey(Session session, UUID account) throws Exception {
+		if (mojangKeyCache != null && account.equals(mojangKeyAccount) && mojangKeyCache.expiresAtMs() > System.currentTimeMillis() + 3_600_000L) {
+			return mojangKeyCache;
+		}
+		String accessToken = session.getAccessToken();
+		if (accessToken == null || accessToken.length() < 20) {
+			throw new IOException("This looks like an offline account - the stats need a real Microsoft Minecraft account");
+		}
+		HttpResponse<String> response;
+		try {
+			response = http.send(HttpRequest.newBuilder(URI.create("https://api.minecraftservices.com/player/certificates"))
+					.timeout(Duration.ofSeconds(10))
+					.header("Authorization", "Bearer " + accessToken)
+					.POST(HttpRequest.BodyPublishers.noBody())
+					.build(), HttpResponse.BodyHandlers.ofString());
+		} catch (java.io.IOException e) {
+			throw new IOException("Can't reach Mojang's key service - a VPN, firewall or antivirus may be blocking it");
+		}
+		if (response.statusCode() != 200) {
+			LOGGER.warn("GTMAddOns: Mojang's certificate service answered HTTP {}", response.statusCode());
+			throw new IOException(explainStatus(response.statusCode()));
+		}
+		JsonObject answer = GSON.fromJson(response.body(), JsonObject.class);
+		JsonObject pair = answer.getAsJsonObject("keyPair");
+		LoginKey key = new LoginKey(
+				java.security.KeyFactory.getInstance("RSA").generatePrivate(new java.security.spec.PKCS8EncodedKeySpec(pemBytes(pair.get("privateKey").getAsString()))),
+				pemBytes(pair.get("publicKey").getAsString()),
+				java.time.Instant.parse(answer.get("expiresAt").getAsString()).toEpochMilli(),
+				Base64.getMimeDecoder().decode(answer.get("publicKeySignatureV2").getAsString()));
+		LOGGER.info("GTMAddOns: the game had no profile key loaded; logging in with the key Mojang issued for the account");
+		mojangKeyCache = key;
+		mojangKeyAccount = account;
+		return key;
+	}
+
+	/** The bytes inside a PEM block (the key's DER encoding): header and footer lines and line breaks removed. */
+	static byte[] pemBytes(String pem) {
+		return Base64.getMimeDecoder().decode(pem.replaceAll("-----(BEGIN|END)[A-Z ]*-----", "").replaceAll("\\s", ""));
 	}
 
 	/**
@@ -459,13 +615,7 @@ public final class StatsClient {
 						.header("Authorization", "Bearer " + accessToken)
 						.POST(HttpRequest.BodyPublishers.noBody())
 						.build(), HttpResponse.BodyHandlers.ofString());
-				advice = switch (response.statusCode()) {
-					case 200 -> "Mojang has a key for you but the game didn't load it - restart Lunar, then delete the 'profilekeys' folder if it persists";
-					case 401 -> "Your Minecraft login expired - log out and back in to your account in Lunar, then try again";
-					case 403 -> "Mojang won't give this account a chat key - check Xbox privacy settings (multiplayer and chat allowed)";
-					case 429 -> "Mojang is limiting key requests right now - wait a few minutes and try again";
-					default -> "Mojang's key service answered HTTP " + response.statusCode() + " - try again later";
-				};
+				advice = explainStatus(response.statusCode());
 				LOGGER.warn("GTMAddOns: no profile key; Mojang's certificate service answered HTTP {}", response.statusCode());
 			}
 		} catch (java.io.IOException | InterruptedException e) {
@@ -482,6 +632,10 @@ public final class StatsClient {
 	}
 
 	private HttpResponse<String> send(String method, String path, String jsonBody, String bearer) throws Exception {
+		return send(method, path, jsonBody, bearer, false);
+	}
+
+	private HttpResponse<String> send(String method, String path, String jsonBody, String bearer, boolean gzip) throws Exception {
 		HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(BACKEND_URL + path))
 				.timeout(Duration.ofSeconds(15))
 				.header("Content-Type", "application/json")
@@ -490,6 +644,29 @@ public final class StatsClient {
 						? HttpRequest.BodyPublishers.noBody()
 						: HttpRequest.BodyPublishers.ofString(jsonBody));
 		if (bearer != null) request.header("Authorization", "Bearer " + bearer);
+		if (gzip) {
+			request.header("Accept-Encoding", "gzip");
+			HttpResponse<byte[]> raw = http.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
+			byte[] bytes = raw.body();
+			if ("gzip".equalsIgnoreCase(raw.headers().firstValue("Content-Encoding").orElse(""))) {
+				try (java.util.zip.GZIPInputStream in = new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(bytes))) {
+					bytes = in.readAllBytes();
+				}
+			}
+			String text = new String(bytes, StandardCharsets.UTF_8);
+			return new TextResponse(raw, text);
+		}
 		return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+	}
+
+	/** A byte response seen as text (already gunzipped), so callers handle it like any other reply. */
+	private record TextResponse(HttpResponse<byte[]> inner, String body) implements HttpResponse<String> {
+		@Override public int statusCode() { return inner.statusCode(); }
+		@Override public java.net.http.HttpRequest request() { return inner.request(); }
+		@Override public java.util.Optional<HttpResponse<String>> previousResponse() { return java.util.Optional.empty(); }
+		@Override public java.net.http.HttpHeaders headers() { return inner.headers(); }
+		@Override public java.util.Optional<javax.net.ssl.SSLSession> sslSession() { return inner.sslSession(); }
+		@Override public java.net.URI uri() { return inner.uri(); }
+		@Override public java.net.http.HttpClient.Version version() { return inner.version(); }
 	}
 }

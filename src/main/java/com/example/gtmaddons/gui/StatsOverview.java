@@ -428,8 +428,11 @@ final class StatsOverview {
 					if (s.avgBps() != null) total += s.avgBps() * s.shots();
 					if (s.bestBps() != null) best = Math.max(best, s.bestBps());
 				}
-				bigColor = shots > 0 ? Ui.scoreColor(Math.max(0.0, Math.min(100.0, 100.0 * (total / shots - com.example.gtmaddons.rating.RatingWeights.MOVEMENT_FLOOR_BPS)
-						/ (com.example.gtmaddons.rating.RatingWeights.MOVEMENT_CEILING_BPS - com.example.gtmaddons.rating.RatingWeights.MOVEMENT_FLOOR_BPS)))) : Ui.TEXT;
+				double scoreSum = 0;
+				for (MovementGunStat s : stats) {
+					if (s.avgBps() != null) scoreSum += com.example.gtmaddons.rating.RatingWeights.movementScore(s.gun(), s.avgBps()) * s.shots();
+				}
+				bigColor = shots > 0 ? Ui.scoreColor(scoreSum / shots) : Ui.TEXT;
 				iconAndBig(context, font, new ItemStack(Items.FEATHER), shots > 0 ? String.format("%.1f", total / shots) : "-", x, y, w);
 				rows(context, font, x, y, w, new String[][] {
 						{ "SAWED-OFF", movementAvg(stats, "Sawed-off Shotgun") }, { "PUMP", movementAvg(stats, "Pump Shotgun") },

@@ -80,7 +80,8 @@ public final class FightTracker {
 	 * tab shows only that kind of fight.
 	 */
 	public record Fight(String key, long startedAt, long endedAt, String outcome, String opponent, PvpCategory category,
-			List<SwapRecord> swaps, List<ShotResult> shots, List<ComboTracker.ComboResult> combos) {}
+			List<SwapRecord> swaps, List<ShotResult> shots, List<ComboTracker.ComboResult> combos,
+			String opponentCategory, String opponentGear, MovementInputTracker.Stats movementInput) {}
 
 	private static final class Current {
 		final long startedAt = System.currentTimeMillis();
@@ -100,8 +101,14 @@ public final class FightTracker {
 		final Current fight;
 		final String outcome, opponent;
 		final long endedAt, nanos;
+		/** The opponent as classified from the gear seen on them (GearTracker), or null. */
+		final GearTracker.OpponentGear gear;
+		/** The movement keys over the fight (MovementInputTracker). */
+		final MovementInputTracker.Stats movement;
 
-		Closing(Current fight, String outcome, String opponent, long endedAt, long nanos) {
+		Closing(Current fight, String outcome, String opponent, long endedAt, long nanos, GearTracker.OpponentGear gear, MovementInputTracker.Stats movement) {
+			this.gear = gear;
+			this.movement = movement;
 			this.fight = fight;
 			this.outcome = outcome;
 			this.opponent = opponent;
@@ -250,12 +257,14 @@ public final class FightTracker {
 		ClientPlayerEntity player = MinecraftClient.getInstance().player;
 		PvpCategory category = player != null ? PvpCategory.classify(player) : PvpCategory.GROUND;
 		current = new Current(category);
+		GearTracker.INSTANCE.onFightStart();
+		MovementInputTracker.INSTANCE.onFightStart();
 		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Fight started (" + category.label + ") - recording stats", Formatting.YELLOW);
 	}
 
 	private void end(String outcome, String opponent) {
 		beforeFightEnds.run();
-		closing.add(new Closing(current, outcome, opponent, System.currentTimeMillis(), System.nanoTime()));
+		closing.add(new Closing(current, outcome, opponent, System.currentTimeMillis(), System.nanoTime(), GearTracker.INSTANCE.onFightEnd(opponent), MovementInputTracker.INSTANCE.onFightEnd()));
 		current = null;
 	}
 
@@ -264,19 +273,24 @@ public final class FightTracker {
 		Current fight = c.fight;
 		String outcome = c.outcome, opponent = c.opponent;
 		Fight done = new Fight(UUID.randomUUID().toString().replace("-", ""), fight.startedAt, c.endedAt,
-				outcome, opponent, fight.category, List.copyOf(fight.swaps), List.copyOf(fight.shots), List.copyOf(fight.combos));
+				outcome, opponent, fight.category, List.copyOf(fight.swaps), List.copyOf(fight.shots), List.copyOf(fight.combos),
+				c.gear != null ? c.gear.category() : null, c.gear != null ? c.gear.json() : null, c.movement);
 		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) {
 			DevLogger.chat(String.format("Fight recorded (%s): %s%s | %.0fs | %d swaps, %d shots, %d combos",
 					done.category().label, outcome.equals("KILL") ? "kill" : "death", opponent != null ? (outcome.equals("KILL") ? " on " : " by ") + opponent : "",
 					(done.endedAt() - done.startedAt()) / 1000.0, done.swaps().size(), done.shots().size(), done.combos().size()),
 					Formatting.GREEN);
 		}
+		if (c.movement != null) DevLogger.INSTANCE.fightMovement(c.movement.describe(), c.movement.toJson().toString());
+		if (c.gear != null) DevLogger.INSTANCE.fightGear(opponent, c.gear.describe(), c.gear.json());
 		for (Consumer<Fight> listener : listeners) listener.accept(done);
 	}
 
 	private void drop(String reason) {
 		beforeFightEnds.run();
 		current = null;
+		GearTracker.INSTANCE.onFightDrop();
+		MovementInputTracker.INSTANCE.onFightDrop();
 		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Fight dropped, nothing recorded: " + reason, Formatting.GRAY);
 	}
 

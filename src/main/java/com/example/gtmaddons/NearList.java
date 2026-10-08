@@ -25,7 +25,8 @@ import java.util.regex.Pattern;
  *
  *   [GTM] Near: Stayzz_ (4b), IPandamix (8b), Ealox (12b), ...
  *
- * Each player is just their name (rank, level and tags are dropped), bold
+ * Each player is just their name (rank, level and tags are dropped, except a "cop" or "hitman" tag, which
+ * is kept before the name), bold
  * and in their rank's color (see rankColor), then their distance in gray
  * brackets. Any message that doesn't parse is left exactly as it was.
  */
@@ -34,6 +35,9 @@ public final class NearList {
 	private static final String HEADER = "Players nearby:";
 	/** One player: everything up to " (NNb)". */
 	private static final Pattern ENTRY = Pattern.compile("\\s*(.+?)\\s*\\((\\d+)b\\)\\s*(?:,|$)");
+
+	/** Tags (letters only, any case) that are shown instead of dropped: a player's in-game job. */
+	private static final java.util.Set<String> JOB_TAGS = java.util.Set.of("cop", "hitman");
 
 	/** A reply counts as asked for if the player ran any command (/near, an alias...) within this long before it. */
 	private static final long ASKED_WINDOW_NANOS = 15_000_000_000L;
@@ -129,7 +133,20 @@ public final class NearList {
 		Style nameStyle = styleAt(runs, nameStart);
 		Formatting rank = words[0].endsWith(">") ? rankColor(words[0].substring(0, words[0].length() - 1)) : null;
 		TextColor color = rank != null ? TextColor.fromFormatting(rank) : nameStyle.getColor();
-		return Text.literal(name).setStyle(nameStyle.withColor(color).withBold(true));
+		Text nameText = Text.literal(name).setStyle(nameStyle.withColor(color).withBold(true));
+
+		// Tags are dropped, except the ones that name a player's job: those stay in front of the name, in their own style.
+		MutableText out = Text.empty();
+		int from = 0;
+		for (int i = 0; i < words.length - 1; i++) {
+			int at = entry.indexOf(words[i], from);
+			if (at < 0) continue;
+			from = at + words[i].length();
+			String letters = words[i].replaceAll("[^A-Za-z]", "").toLowerCase(java.util.Locale.ROOT);
+			if (JOB_TAGS.contains(letters)) out.append(Text.literal(words[i] + " ").setStyle(styleAt(runs, p.start() + at).withBold(false)));
+		}
+		out.append(nameText);
+		return out;
 	}
 
 	/** The style of the run the character at index is in. */

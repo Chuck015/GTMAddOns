@@ -155,6 +155,37 @@ public final class Updater {
 		}, minutes, TimeUnit.MINUTES);
 	}
 
+	/** Joins closer together than this don't each start a check (a reconnect loop shouldn't hammer GitHub). */
+	private static final long JOIN_CHECK_GAP_NANOS = 120L * 1_000_000_000L;
+	private volatile long lastJoinCheckNanos = 0L;
+
+	/**
+	 * The player joined a server (the moment the mod-icon check also runs): look for a new version once, whatever the 30-minute timer
+	 * says, and mention a waiting update again. Without this a new version could sit unseen for hours, and the one chat message about it
+	 * was easy to miss.
+	 */
+	public void onJoin() {
+		long now = System.nanoTime();
+		if (lastJoinCheckNanos != 0L && now - lastJoinCheckNanos < JOIN_CHECK_GAP_NANOS) return;
+		lastJoinCheckNanos = now;
+		if (state == State.IDLE || state == State.CHECKING || state == State.DOWNLOADING) return;
+		if (state == State.READY) {
+			notice = "GTMAddOns " + latestVersion + " is downloaded - close the game fully to install it.";
+			return;
+		}
+		// So a version the player was told about earlier is mentioned again this session.
+		notifiedVersion = null;
+		Thread thread = new Thread(() -> {
+			try {
+				check();
+			} catch (Throwable t) {
+				LOGGER.info("GTMAddOns: update check on join failed: {}", t.toString());
+			}
+		}, "GTMAddOns updater");
+		thread.setDaemon(true);
+		thread.start();
+	}
+
 	/** Opening the /gao menu: look again if the last check was a while ago (never while downloading or ready). */
 	public void recheckSoon() {
 		if (state == State.DOWNLOADING || state == State.READY || state == State.IDLE || state == State.CHECKING) return;
@@ -205,7 +236,14 @@ public final class Updater {
 				.header("User-Agent", "GTMAddOns/" + modVersion());
 		if (etag != null) request.header("If-None-Match", etag);
 		HttpResponse<String> response = http.send(request.GET().build(), HttpResponse.BodyHandlers.ofString());
-		if (response.statusCode() == 304) return; // nothing changed since the last look
+		if (response.statusCode() == 304) {
+			// Nothing changed since the last look - but an update found earlier is still worth mentioning (see onJoin).
+			if (state == State.AVAILABLE && latestVersion != null && !latestVersion.equals(notifiedVersion) && !required) {
+				notifiedVersion = latestVersion;
+				notice = "GTMAddOns " + latestVersion + " is out (you have " + modVersion() + "). Run /gao update or click Update in /gao.";
+			}
+			return;
+		}
 		if (response.statusCode() != 200) {
 			LOGGER.info("GTMAddOns: no release info (HTTP {})", response.statusCode());
 			if (state == State.CHECKING) state = State.FAILED;

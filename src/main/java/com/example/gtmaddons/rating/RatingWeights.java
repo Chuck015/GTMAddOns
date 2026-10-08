@@ -141,7 +141,9 @@ public final class RatingWeights {
 	//  3. GROUND MOVEMENT
 	//     Average horizontal speed right after movement gun shots (Sawed-off,
 	//     Pump, Heavy Revolver). Our stats, 2026-09-28: averages 10-15 b/s,
-	//     bests 16-20.
+	//     bests 16-20; by gun (2026-10-08): Heavy Revolver averages 15.8, Sawed-off 13.4,
+	//     Pump 10.3. The guns don't launch equally far, so each has its own ceiling
+	//     (movementCeiling) and is scored by how much of its own potential you get.
 	// ========================================================================
 
 	/** Movement gun shots needed before Ground movement is rated, and for it to count in full. */
@@ -150,8 +152,27 @@ public final class RatingWeights {
 
 	/** Speed (blocks/s) that scores 0: sprinting, so the shot added nothing. */
 	public static final double MOVEMENT_FLOOR_BPS = 5.6;
-	/** Speed (blocks/s) that scores 100: about the best seen so far. */
+	/** Speed (blocks/s) that scores 100 for a movement gun without its own ceiling below: about the best seen so far. */
 	public static final double MOVEMENT_CEILING_BPS = 20.0;
+	/** Per gun: the speed that scores 100. Heavy Revolver the highest, Sawed-off in the middle, Pump the lowest. */
+	public static final double MOVEMENT_CEILING_HEAVY_REVOLVER_BPS = 24.0;
+	public static final double MOVEMENT_CEILING_SAWED_OFF_BPS = 20.0;
+	public static final double MOVEMENT_CEILING_PUMP_BPS = 16.0;
+
+	/** The speed that scores 100 for this movement gun. */
+	public static double movementCeiling(String gun) {
+		String name = gun == null ? "" : gun.toLowerCase(Locale.ROOT);
+		if (name.contains("revolver")) return MOVEMENT_CEILING_HEAVY_REVOLVER_BPS;
+		if (name.contains("sawed")) return MOVEMENT_CEILING_SAWED_OFF_BPS;
+		if (name.contains("pump")) return MOVEMENT_CEILING_PUMP_BPS;
+		return MOVEMENT_CEILING_BPS;
+	}
+
+	/** 0-100: how much of this gun's own potential an average speed of avgBps is (sprinting = 0, the gun's ceiling = 100). */
+	public static double movementScore(String gun, double avgBps) {
+		double score = 100.0 * (avgBps - MOVEMENT_FLOOR_BPS) / (movementCeiling(gun) - MOVEMENT_FLOOR_BPS);
+		return Math.max(0.0, Math.min(100.0, score));
+	}
 
 	// ========================================================================
 	//  4. MELEE (JP's second rating, and part of Air's Overall)

@@ -237,6 +237,10 @@ public class PlayersScreen extends Screen {
 		ButtonWidget prev = addDrawableChild(ButtonWidget.builder(Text.literal("< Prev"), b -> changePage(-1))
 				.dimensions(width / 2 - 155, bottom, 70, 20).build());
 		prev.active = page > 0;
+		if (AdminMode.isOn() && mod != null) {
+			addDrawableChild(ButtonWidget.builder(Text.literal("Flags..."), b -> client.setScreen(new AdminFlaggedScreen(this, mod)))
+					.dimensions(width - 62, 4, 58, 16).build());
+		}
 		addDrawableChild(ButtonWidget.builder(parent != null ? ScreenTexts.BACK : ScreenTexts.DONE, b -> close())
 				.dimensions(width / 2 - 75, bottom, 150, 20).build());
 		ButtonWidget next = addDrawableChild(ButtonWidget.builder(Text.literal("Next >"), b -> changePage(1))
@@ -258,7 +262,7 @@ public class PlayersScreen extends Screen {
 				status = "Couldn't load " + player.name() + ": " + Format.error(error);
 			} else {
 				status = null;
-				PlayerScreen screen = new PlayerScreen(this, detail, stats, null);
+				PlayerScreen screen = new PlayerScreen(this, detail, stats, null).withAdminMod(mod);
 				screen.setOnAdminChange(() -> stale = true);
 				client.setScreen(screen);
 			}

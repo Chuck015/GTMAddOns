@@ -36,6 +36,8 @@ public final class CobwebTransparency {
 	/** Called as each block sprite is created: thins the cobweb's pixels by the setting. */
 	public static void thin(Identifier id, NativeImage image) {
 		if (settings == null || !COBWEB.equals(id.toString())) return;
+		// Every resource reload rebuilds the block textures, so this marks one (see the dev filter Stalls).
+		com.example.gtmaddons.gun.DevLogger.INSTANCE.noteResourceReload();
 		int percent = settings.cobwebTransparency;
 		applied = percent;
 		if (percent <= 0 || !done.add(image)) return;

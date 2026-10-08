@@ -8,7 +8,7 @@ import java.util.UUID;
 
 /**
  * The GTMAddOns icon after a player's name, in the tab list and on nametags (see the PlayerListHud and name tag
- * mixins). Who runs the mod comes from the backend through StatsClient. The icon goes after the name: Lunar Client
+ * mixins). Who runs the mod comes from a one-time check with the backend when a player appears in the tab list (see StatsClient.updateOnline). The icon goes after the name: Lunar Client
  * puts its own logo before the name of its users, so the two never overlap.
  */
 public final class ModUsers {
@@ -22,13 +22,13 @@ public final class ModUsers {
 
 	private static long nextPruneMillis = 0L;
 
-	/** Every couple of seconds: forget remembered mod users who left the server (see StatsClient.retainOnline). */
+	/** Every couple of seconds: tell the stats client who is on the server (it checks new players once, see StatsClient.updateOnline). */
 	public static void onFrame(net.minecraft.client.MinecraftClient client) {
 		if (stats == null) return;
 		long now = System.currentTimeMillis();
 		if (now < nextPruneMillis) return;
 		nextPruneMillis = now + 2000L;
-		stats.retainOnline(client.getNetworkHandler() != null ? client.getNetworkHandler().getPlayerUuids() : java.util.List.<java.util.UUID>of());
+		stats.updateOnline(client.getNetworkHandler() != null ? client.getNetworkHandler().getPlayerUuids() : java.util.List.<java.util.UUID>of());
 	}
 
 	public static void init(StatsClient statsClient, Settings modSettings) {

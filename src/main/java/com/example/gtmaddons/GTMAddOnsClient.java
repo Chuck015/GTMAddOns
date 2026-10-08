@@ -112,6 +112,10 @@ public class GTMAddOnsClient implements ClientModInitializer {
 
 	// Display state
 	private boolean swapInProgress = false;
+	/** How the inventory of the current swap opened (see SwapRecord): cursor offset from the window centre, GUI placement and scale. */
+	private double openCursorDx, openCursorDy, openGuiX, openGuiY, openScaledW, openScaledH, openGuiScale;
+	private boolean openCreative, openFromScreen;
+	private long lastScreenRemovedNanos = -1L;
 	/** The swap recording button was used during this swap: it counts as canceled. */
 	private boolean swapCanceledByButton = false;
 	private long openTimeNanos = 0L;
@@ -124,6 +128,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 
 	// Wingsuit-arrival detection
 	private ItemStack[] inventoryAtOpen = new ItemStack[0];
+	/** The inventory differed from how it was at open at some frame: an item that was moved and put back still makes the swap CANCELED. */
+	private boolean inventoryTouched = false;
 	private int hotbarWingsuitsAtOpen = 0;
 	private long arrivalNanos = -1L;
 	private PvpCategory swapCategory = PvpCategory.WING;
@@ -143,6 +149,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	/** Momentum is only measured when you were already moving this fast (blocks/s): sprinting is 5.6, a glide 20 or more. */
 	private static final double MOMENTUM_MIN_BPS = 10.0;
 	private SwapRecord momentumRecord = null;
+	/** The held swap has a speed to average, and/or a window of movement keys to record. */
+	private boolean momentumHasSpeed = false, momentumInputWindow = false;
 	private boolean momentumInFight = false;
 	private long momentumStartNanos = 0L;
 	private long momentumLastNanos = 0L;
@@ -183,6 +191,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			momentumFrame(client);
 			ModUsers.onFrame(client);
 			// Before CombatTracker, so a death is seen before it clears the tag.
+			GearTracker.INSTANCE.onFrame(client);
+			MovementInputTracker.INSTANCE.onFrame(client);
 			FightTracker.INSTANCE.onFrame(client);
 			CombatTracker.INSTANCE.onFrame(client);
 			ShotTracker.INSTANCE.onFrame(client);
@@ -241,7 +251,11 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			// AFTER_INIT also fires when the open screen is resized. Fabric
 			// clears the screen's listeners then, so re-register them, but
 			// don't restart a swap that's already in progress.
-			if (isTrackedInventoryScreen(screen) && (swapInProgress || onInventoryOpened(client))) {
+			// Which screen was just replaced by this one (for fromScreen): setScreen removes the old screen right before this runs.
+			ScreenEvents.remove(screen).register(closedScreen -> lastScreenRemovedNanos = System.nanoTime());
+			boolean resumed = swapInProgress;
+			if (isTrackedInventoryScreen(screen) && (resumed || onInventoryOpened(client))) {
+				if (!resumed) captureOpenState(client, screen);
 				// Checked every frame so arrival and mouse tracking are frame-accurate.
 				ScreenEvents.afterRender(screen).register((s, drawContext, mouseX, mouseY, tickDelta) -> onInventoryFrame(client, s));
 				// Fires the instant THIS screen instance is removed - i.e.
@@ -282,6 +296,21 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		// A swap still having its momentum measured counts too.
 		finishMomentum();
 		SwapSession.INSTANCE.end();
+	}
+
+	/** Admin mode: what the backend knows about a player (see AdminPlayerInfoScreen). */
+	public CompletableFuture<PlayerStats.AdminPlayerInfo> fetchAdminPlayerInfo(String name) {
+		return stats.fetchAdminPlayerInfo(name);
+	}
+
+	/** Admin mode: every player with a warning flag (see AdminFlaggedScreen). */
+	public CompletableFuture<PlayerStats.FlaggedPlayers> fetchAdminFlagged() {
+		return stats.fetchAdminFlagged();
+	}
+
+	/** Admin mode: what each flag needs before it shows (see AdminPlayerInfoScreen). */
+	public CompletableFuture<PlayerStats.FlagRules> fetchAdminFlagRules() {
+		return stats.fetchAdminFlagRules();
 	}
 
 	public boolean isFishHeadsOn() {
@@ -724,13 +753,37 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		speedAtOpenBps = horizontalSpeed(client);
 		wingToBlankSlot = false;
 		inventoryAtOpen = snapshot(inventory);
+		inventoryTouched = false;
 		hotbarWingsuitsAtOpen = countHotbarWingsuits(inventory);
 		debugTracker.reset();
 		return true;
 	}
 
+	/**
+	 * Records where the cursor and the inventory are the moment the inventory appears. From gameplay vanilla puts the cursor exactly on
+	 * the window centre; the recipe book shifts the inventory sideways, never down.
+	 */
+	private void captureOpenState(MinecraftClient client, Screen screen) {
+		Window window = client.getWindow();
+		openCursorDx = client.mouse.getX() - window.getWidth() / 2.0;
+		openCursorDy = client.mouse.getY() - window.getHeight() / 2.0;
+		openScaledW = window.getScaledWidth();
+		openScaledH = window.getScaledHeight();
+		openGuiScale = (double) window.getScaleFactor();
+		if (screen instanceof HandledScreen<?> handled) {
+			HandledScreenAccessor accessor = (HandledScreenAccessor) handled;
+			openGuiX = accessor.gtmaddons$getX();
+			openGuiY = accessor.gtmaddons$getY();
+		} else {
+			openGuiX = openGuiY = 0;
+		}
+		openCreative = screen instanceof CreativeInventoryScreen;
+		openFromScreen = lastScreenRemovedNanos >= 0 && System.nanoTime() - lastScreenRemovedNanos < 5_000_000L;
+	}
+
 	private void onInventoryFrame(MinecraftClient client, Screen screen) {
 		if (!swapInProgress) return;
+		if (!inventoryTouched && client.player != null && inventoryChanged(client.player.getInventory())) inventoryTouched = true;
 		long now = System.nanoTime();
 		// Sample the mouse before checking arrival, so this frame's movement
 		// is counted as leading up to the move rather than after it.
@@ -827,7 +880,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		SwapResult result;
 		if (arrivalNanos >= 0) {
 			result = SwapResult.SUCCESS;
-		} else if (canceledByButton || (client.player != null && inventoryChanged(client.player.getInventory()))) {
+		} else if (canceledByButton || inventoryTouched || (client.player != null && inventoryChanged(client.player.getInventory()))) {
 			result = SwapResult.CANCELED;
 		} else {
 			result = SwapResult.FAILED;
@@ -852,9 +905,14 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		}
 
 		SwapRecord record = buildRecord(client, result, closeNanos);
-		if (record.speedBeforeBps() != null) {
-			// Momentum swap: held back while the speed after it is averaged (see momentumFrame).
+		// A Wing / Air swap that put the chest-slot item into an empty hotbar slot also has its movement keys recorded afterwards.
+		boolean inputWindow = result == SwapResult.SUCCESS && wingToBlankSlot;
+		if (record.speedBeforeBps() != null || inputWindow) {
+			// Momentum / movement swap: held back while the speed and keys after it are measured (see momentumFrame).
 			momentumRecord = record;
+			momentumHasSpeed = record.speedBeforeBps() != null;
+			momentumInputWindow = inputWindow;
+			if (inputWindow) MovementInputTracker.INSTANCE.startSwapWindow();
 			momentumInFight = FightTracker.INSTANCE.inFight();
 			momentumStartNanos = momentumLastNanos = closeNanos;
 			momentumLastBps = horizontalSpeed(client);
@@ -902,7 +960,11 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		if (record == null) return;
 		momentumRecord = null;
 		long elapsed = momentumLastNanos - momentumStartNanos;
-		SwapRecord done = record.withSpeedAfterBps(elapsed > 0 ? momentumSum / elapsed : momentumLastBps);
+		SwapRecord done = momentumHasSpeed ? record.withSpeedAfterBps(elapsed > 0 ? momentumSum / elapsed : momentumLastBps) : record;
+		if (momentumInputWindow) {
+			MovementInputTracker.Stats keys = MovementInputTracker.INSTANCE.finishSwapWindow();
+			if (keys != null) done = done.withAfterInput(Math.round(keys.w), Math.round(keys.a), Math.round(keys.s), Math.round(keys.d), Math.round(keys.ms), keys.strafeSwitches);
+		}
 		// Only the fight it was made in - not one that started during the window.
 		if (momentumInFight) FightTracker.INSTANCE.addSwap(done);
 		SwapSession.INSTANCE.add(done);
@@ -939,7 +1001,13 @@ public class GTMAddOnsClient implements ClientModInitializer {
 				swapCategory.name(),
 				lastSwapType != null ? lastSwapType.name() : null,
 				momentum ? speedAtOpenBps : null,
-				momentum ? horizontalSpeed(client) : null);
+				momentum ? horizontalSpeed(client) : null,
+				openCursorDx, openCursorDy,
+				seen ? debugTracker.directDistance() : null,
+				seen ? debugTracker.approachPath() : null,
+				openGuiX, openGuiY, openScaledW, openScaledH, openGuiScale,
+				openCreative ? 1.0 : 0.0, openFromScreen ? 1.0 : 0.0,
+				null, null, null, null, null, null);
 	}
 
 	private void sendDebugReport(SwapRecord r) {

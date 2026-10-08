@@ -71,6 +71,7 @@ public final class DevLogger {
 	private final MeleeDamageDebugger melee = new MeleeDamageDebugger(this);
 	private final NetLauncherDebugger netLauncher = new NetLauncherDebugger(this);
 	private final NearLogger near = new NearLogger(this);
+	private final EquipmentLogger equipment = new EquipmentLogger(this);
 	private com.example.gtmaddons.PvpCategory lastCategory = null;
 
 	// Shot detection
@@ -111,7 +112,10 @@ public final class DevLogger {
 	public void setEnabled(boolean enabled, boolean saveLog) {
 		// Finish the current window under the old mode (switching dev <-> QA too).
 		if (!enabled || saveLog != this.saveLog) flushWindow();
-		if (enabled && !this.enabled) movement.reset();
+		if (enabled && !this.enabled) {
+			movement.reset();
+			equipment.reset();
+		}
 		this.enabled = enabled;
 		this.saveLog = saveLog;
 		lastAmmo = null;
@@ -184,7 +188,42 @@ public final class DevLogger {
 		perfWindowStart = now;
 	}
 
+	// ---- Stalls (dev filter "Stalls") ----
+
+	private static final long STALL_NANOS = 250_000_000L;
+	private long lastFrameNanos = 0L;
+	/** Set from the resource loading threads when the block textures are rebuilt (every resource reload). */
+	private volatile long reloadNanos = 0L;
+	private long reloadReportedNanos = 0L;
+
+	/** A resource reload is happening (called from the cobweb sprite's creation, on a loading thread). */
+	public void noteResourceReload() {
+		reloadNanos = System.nanoTime();
+	}
+
+	/** Called first thing every frame: a long gap since the last frame in the world is a stall. */
+	private void checkStall(MinecraftClient client) {
+		long now = System.nanoTime();
+		long previous = lastFrameNanos;
+		lastFrameNanos = client.world != null ? now : 0L;
+		long reload = reloadNanos;
+		boolean reloaded = reload > reloadReportedNanos;
+		if (reloaded) reloadReportedNanos = reload;
+		if (!enabled || !wants(DevFilter.STALLS)) return;
+		if (previous != 0L && now - previous >= STALL_NANOS) {
+			long ms = (now - previous) / 1_000_000L;
+			boolean reloadDuring = reload >= previous && reload <= now;
+			String line = String.format("STALL  the game froze for %d ms (%.1f s), ending at %s | resource reload during it: %s | connected: %s",
+					ms, ms / 1000.0, java.time.LocalTime.now().withNano(0), reloadDuring ? "YES" : "no", client.getNetworkHandler() != null ? "yes" : "no");
+			writeBlock(null, List.of(line));
+			if (ms >= 1000L) chat(line, Formatting.RED);
+		} else if (reloaded) {
+			writeBlock(null, List.of("RELOAD  resources were reloaded (the block textures were rebuilt) at " + java.time.LocalTime.now().withNano(0)));
+		}
+	}
+
 	public void onFrame(MinecraftClient client) {
+		checkStall(client);
 		if (!enabled) return;
 		if (windowEndNanos != 0L && System.nanoTime() >= windowEndNanos) flushWindow();
 		movement.onFrame(client);
@@ -192,6 +231,7 @@ public final class DevLogger {
 		if (wants(DevFilter.MELEE_DAMAGE)) melee.onFrame(client);
 		if (wants(DevFilter.NET_LAUNCHER)) netLauncher.onFrame(client);
 		near.onFrame();
+		if (wants(DevFilter.EQUIPMENT)) equipment.onFrame(client);
 		reportCategoryChange(client);
 
 		ClientPlayerEntity player = client.player;
@@ -499,6 +539,20 @@ public final class DevLogger {
 	}
 
 	// ---- Output ----
+
+	/** The movement keys over a finished fight (see MovementInputTracker): a chat line and a block in the log. */
+	public void fightMovement(String description, String json) {
+		if (!wants(DevFilter.FIGHTS)) return;
+		chat("Movement: " + description, Formatting.GRAY);
+		writeBlock("FIGHT MOVEMENT", List.of(description, json));
+	}
+
+	/** A finished fight's opponent, as classified from their gear (see GearTracker): a chat line and a block in the log. */
+	public void fightGear(String opponent, String description, String json) {
+		if (!wants(DevFilter.FIGHTS)) return;
+		chat("Opponent " + (opponent != null ? opponent : "(unknown)") + " looked like: " + description, Formatting.GRAY);
+		writeBlock("FIGHT GEAR  " + (opponent != null ? opponent : "(unknown)"), List.of(description, json));
+	}
 
 	void add(String line) {
 		long ms = (System.nanoTime() - windowStartNanos) / 1_000_000L;

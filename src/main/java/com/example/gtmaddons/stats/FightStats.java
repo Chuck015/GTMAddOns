@@ -138,9 +138,10 @@ public final class FightStats {
 		}
 		movementGuns.sort(Comparator.comparingLong(MovementGunStat::shots).reversed());
 
+		List<SwapRow> airGood = air.stream().filter(s -> "SUCCESS".equals(s.result())).toList();
 		return new PlayerDetail(history.uuid(), history.name(), history.firstSeen(), history.lastSeen(),
 				wing.size(), successes, failures, cancels, best, averages(good), recent, guns, airSwaps, combos,
-				fights.size(), kills, deaths, recentFights, movementGuns);
+				fights.size(), kills, deaths, recentFights, movementGuns, airGood.isEmpty() ? null : averages(airGood));
 	}
 
 	/** Air swaps grouped by type (failed and canceled attempts have no type and group as null), with their momentum. */
