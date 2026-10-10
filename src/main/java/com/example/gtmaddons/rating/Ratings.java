@@ -6,6 +6,7 @@ import com.example.gtmaddons.stats.PlayerStats.Averages;
 import com.example.gtmaddons.stats.PlayerStats.ComboStat;
 import com.example.gtmaddons.stats.PlayerStats.GunStat;
 import com.example.gtmaddons.stats.PlayerStats.MovementGunStat;
+import com.example.gtmaddons.stats.PlayerStats.OpponentOutcome;
 import com.example.gtmaddons.stats.PlayerStats.PlayerDetail;
 
 import java.util.ArrayList;
@@ -37,9 +38,10 @@ import java.util.Map;
  *             (50 = even), each as a %, averaged by weight. JP calls Aim
  *             "Gun aim" (see aimLabel, secondLabel).
  *   Overall:  Wing - the composite (see RatingWeights):
- *               swap      success rate x (1 / average swap time), scored as
- *                         an effective swap time (average / success rate)
- *                         from BEST_SWAP_MS = 100 to WORST_SWAP_MS = 0
+ *               swap speed        average swap time, from the owner's table
+ *                                 (100 ms = 100 ... 700 ms = 0)
+ *               swap reliability  success rate, from the owner's table
+ *                                 (98% = 100 ... 50% = 0)
  *               momentum  % of your speed kept through the swap
  *               aim       as above, weighted more the more of your kills
  *                         come from long-range guns (snipers, Musket)
@@ -47,8 +49,8 @@ import java.util.Map;
  *             shown once swap and aim both have enough data. Ground - the
  *             same with movement in place of swap and momentum. Air - Air
  *             swap score, aim, melee (Air combos) and K/D, shown once swap
- *             and aim have enough data (no momentum: it's only recorded for
- *             Wing swaps). JP - gun aim (long-range weighted), melee and
+ *             and aim have enough data; Air is rated like Wing throughout
+ *             (the same weights, shot impacts and netted shots). JP - gun aim (long-range weighted), melee and
  *             K/D, with K/D weighted JP.KD; shown once K/D and gun
  *             aim or melee have enough data.
  *
@@ -63,10 +65,14 @@ public final class Ratings {
 	 * with a null score has no data yet and was left out.
 	 */
 	public record Result(Double aim, Double movement, Double overall, List<Part> parts, List<String> breakdown,
-			boolean aimAssumed, boolean movementAssumed) {
+			boolean aimAssumed, boolean movementAssumed, Double skill, Double performance) {
 		/** A rating worked out from real data (nothing assumed). */
 		public Result(Double aim, Double movement, Double overall, List<Part> parts, List<String> breakdown) {
-			this(aim, movement, overall, parts, breakdown, false, false);
+			this(aim, movement, overall, parts, breakdown, false, false, null, null);
+		}
+
+		public Result(Double aim, Double movement, Double overall, List<Part> parts, List<String> breakdown, boolean aimAssumed, boolean movementAssumed) {
+			this(aim, movement, overall, parts, breakdown, aimAssumed, movementAssumed, null, null);
 		}
 	}
 
@@ -129,7 +135,7 @@ public final class Ratings {
 			for (Part p : r.parts()) {
 				// The parts each category's Overall is built on (see wing, ground, air, jp): none may stay empty.
 				boolean required = switch (category) {
-					case WING, AIR -> p.name().equals("Swap") || p.name().equals("Aim");
+					case WING, AIR -> p.name().startsWith("Swap") || p.name().equals("Aim");
 					case GROUND -> p.name().equals("Movement") || p.name().equals("Aim");
 					case JP -> p.name().equals("Gun aim") || p.name().equals("Melee");
 				};
@@ -167,10 +173,12 @@ public final class Ratings {
 		if (detail.guns() != null) {
 			for (GunStat g : detail.guns()) {
 				if (!category.name().equals(g.category())) continue;
-				long[] t = guns.computeIfAbsent(g.gun(), k -> new long[3]);
+				long[] t = guns.computeIfAbsent(g.gun(), k -> new long[5]);
 				t[0] += g.shots();
 				t[1] += g.hits();
 				t[2] += g.headshots();
+				t[3] += g.netShots();
+				t[4] += g.netHeadshots();
 			}
 		}
 		breakdown.add("Aim - per gun: score (impact, shots, HS / body / miss)");
@@ -186,11 +194,11 @@ public final class Ratings {
 			double hs = (double) headshots / shots;
 			double body = (double) (hits - headshots) / shots;
 			double miss = 1.0 - (double) hits / shots;
-			double impact = RatingWeights.impact(gun);
+			double impact = RatingWeights.aimImpact(category, gun, shots, headshots, e.getValue()[3], e.getValue()[4]);
 			double weight = impact * Math.min(shots, RatingWeights.SHOT_WEIGHT_CAP);
 			weighted += score * weight;
 			totalWeight += weight;
-			breakdown.add(String.format("  %s: %.0f (%.1fx, %d shots, %.0f%% / %.0f%% / %.0f%%)",
+			breakdown.add(String.format("  %s: %.0f (impact %.1f, %d shots, %.0f%% / %.0f%% / %.0f%%)",
 					gun, score, impact, shots, hs * 100, body * 100, miss * 100));
 		}
 		if (totalWeight == 0) {
@@ -207,6 +215,11 @@ public final class Ratings {
 	 */
 	public static Double gunAim(PvpCategory category, String gun, long shots, long hits, long headshots) {
 		if (shots < need(RatingWeights.MIN_SHOTS_PER_GUN)) return null;
+		if (RatingWeights.isNetLauncher(gun)) {
+			// Slows opponents rather than killing: judged by hit rate against a low ceiling, gently (see RatingWeights.NET_LAUNCHER_HIT_CEILING).
+			double rate = (hits + RatingWeights.NET_LAUNCHER_PRIOR_RATE * RatingWeights.AIM_PRIOR_SHOTS) / (shots + RatingWeights.AIM_PRIOR_SHOTS);
+			return clamp(100.0 * Math.pow(Math.min(1.0, rate / RatingWeights.NET_LAUNCHER_HIT_CEILING), RatingWeights.NET_LAUNCHER_HIT_EXPONENT));
+		}
 		double baseline = RatingWeights.baseline(category, gun);
 		double points = (double) headshots * RatingWeights.HEADSHOT_POINTS
 				+ (double) (hits - headshots) * RatingWeights.BODY_SHOT_POINTS;
@@ -235,25 +248,87 @@ public final class Ratings {
 		breakdown.add("Wing rating - part: score (weight)");
 		int attempts = detail.total() - detail.cancels();
 		Averages avg = detail.avg();
-		Double swap = null;
+		Double swapSpeed = null, swapReliability = null;
 		if (detail.successes() < need(RatingWeights.MIN_SWAPS) || avg == null || avg.totalMs() == null) {
 			breakdown.add("  swap: not enough swaps yet (" + RatingWeights.MIN_SWAPS + " successful)");
 		} else {
-			swap = shrink(swapScore(detail.successes(), attempts, avg.totalMs(), RatingWeights.BEST_SWAP_MS, RatingWeights.WORST_SWAP_MS, RatingWeights.Wing.SWAP, breakdown),
-					detail.successes(), RatingWeights.FULL_SWAPS);
+			double[] scores = swapScores(detail.successes(), attempts, avg.totalMs(), RatingWeights.Wing.SWAP_SPEED, RatingWeights.Wing.SWAP_RELIABILITY, breakdown);
+			swapSpeed = shrink(scores[0], detail.successes(), RatingWeights.FULL_SWAPS);
+			swapReliability = shrink(scores[1], detail.successes(), RatingWeights.FULL_SWAPS);
 		}
 		Double momentum = momentumScore(avg, breakdown);
 		Double kd = kdScore(detail, RatingWeights.Wing.KD, breakdown);
 		double aimWeight = aimWeight(detail, category, RatingWeights.Wing.AIM, breakdown);
 
-		Part swapPart = new Part("Swap", swap, RatingWeights.Wing.SWAP);
+		Part speedPart = new Part("Swap speed", swapSpeed, RatingWeights.Wing.SWAP_SPEED);
+		Part reliabilityPart = new Part("Swap reliability", swapReliability, RatingWeights.Wing.SWAP_RELIABILITY);
 		Part momentumPart = new Part("Momentum", momentum, RatingWeights.Wing.MOMENTUM);
-		Double movement = weighted(swapPart, momentumPart);
-		List<Part> parts = List.of(swapPart, momentumPart, new Part("Aim", aim, aimWeight), new Part("K/D", kd, RatingWeights.Wing.KD));
-		Double overall = swap != null && aim != null ? weighted(parts) : null;
+		Double movement = weighted(speedPart, reliabilityPart, momentumPart);
+		List<Part> parts = List.of(speedPart, reliabilityPart, momentumPart, new Part("Aim", aim, aimWeight), new Part("K/D", kd, RatingWeights.Wing.KD));
+		Double overall = swapSpeed != null && aim != null ? weighted(parts) : null;
 		if (aim != null) breakdown.add(String.format("  aim: %.0f (%.2f)", aim, aimWeight));
 		if (overall == null) breakdown.add("  overall needs both swap and aim");
-		return new Result(aim, movement, overall, parts, breakdown);
+
+		Double[] extra = skillAndPerformance(detail, category, swapSkillParts(swapSpeed, swapReliability, momentum, aim), swapSpeed != null && aim != null, "swaps and aim", breakdown);
+		return new Result(aim, movement, overall, parts, breakdown, false, false, extra[0], extra[1]);
+	}
+
+	/**
+	 * Skill and Performance, the same for every PvP (RatingWeights.Skill / Performance): Skill is the category's mechanical parts only
+	 * (no results); Performance is 40% Skill, 35% K/D, 15% kills per fight (the win rate) and 10% survival time (how long the fights
+	 * you died in lasted). ready says whether the mechanical parts have enough data (the same rule as the category's Overall, minus K/D).
+	 * Returns {skill, performance}, either null without enough data.
+	 */
+	private static Double[] skillAndPerformance(PlayerDetail detail, PvpCategory category, List<Part> skillParts, boolean ready, String needs, List<String> breakdown) {
+		Double skill = ready ? weighted(skillParts) : null;
+		// The Results rating counts kills by who you killed (RatingWeights.winWeight); deaths in full. Overall's K/D is not adjusted.
+		double wonKills = weightedKills(detail, category);
+		Double kd = null, killsPerFight = null;
+		if (detail.fights() > 0) {
+			double ratio = detail.deaths() > 0 ? wonKills / detail.deaths() : wonKills;
+			kd = clamp(RatingWeights.SCORE_AT_BASELINE * ratio / RatingWeights.KD_BASELINE);
+			double decided = wonKills + detail.deaths();
+			killsPerFight = decided > 0 ? RatingWeights.winRateScore(wonKills / decided) : null;
+		}
+		Double survival = null;
+		if (detail.deathMs() != null && detail.deaths() > 0) {
+			survival = shrink(RatingWeights.survivalScore(detail.deathMs() / 1000.0), detail.deaths(), RatingWeights.FULL_DEATHS);
+		}
+		List<Part> performanceParts = List.of(new Part("Mechanics", skill, RatingWeights.Performance.MECHANICS),
+				new Part("K/D", kd, RatingWeights.Performance.KD), new Part("Kills per fight", killsPerFight, RatingWeights.Performance.KILLS_PER_FIGHT),
+				new Part("Survival time", survival, RatingWeights.Performance.SURVIVAL));
+		Double performance = skill != null ? weighted(performanceParts) : null;
+		breakdown.add("Mechanics rating (no results) - part: score (weight)");
+		for (Part p : skillParts) breakdown.add(String.format("  %s: %s (%.2f)", p.name().toLowerCase(java.util.Locale.ROOT), p.score() != null ? String.format("%.0f", p.score()) : "-", p.weight()));
+		breakdown.add(skill != null ? String.format("  mechanics: %.0f", skill) : "  mechanics needs " + needs);
+		breakdown.add("Results rating - part: score (weight)");
+		for (Part p : performanceParts) breakdown.add(String.format("  %s: %s (%.2f)", p.name().toLowerCase(java.util.Locale.ROOT), p.score() != null ? String.format("%.0f", p.score()) : "-", p.weight()));
+		if (detail.fights() > 0) breakdown.add(String.format("    kills per fight: %d of %d fights (%.0f%%)", detail.kills(), detail.fights(), 100.0 * detail.kills() / detail.fights()));
+		if (Math.abs(wonKills - detail.kills()) > 1e-9) {
+			breakdown.add(String.format("    opponent adjustment: your %d kills count as %.1f (a kill on a Ground opponent counts %.2f)", detail.kills(), wonKills, RatingWeights.EASY_OPPONENT_WIN_WEIGHT));
+		}
+		if (detail.deathMs() != null) breakdown.add(String.format("    survival: %.1f s on average in the %d fights you died in", detail.deathMs() / 1000.0, detail.deaths()));
+		breakdown.add(performance != null ? String.format("  results: %.0f", performance) : "  results needs the mechanics rating");
+		return new Double[] { skill, performance };
+	}
+
+	/** Your kills counted by the opponent's PvP (RatingWeights.winWeight); all of them in full where the backend sent no breakdown. */
+	private static double weightedKills(PlayerDetail detail, PvpCategory category) {
+		if (detail.byOpponent() == null || detail.byOpponent().isEmpty()) return detail.kills();
+		double sum = 0;
+		long counted = 0;
+		for (OpponentOutcome o : detail.byOpponent()) {
+			sum += o.kills() * RatingWeights.winWeight(category, o.category() == null || o.category().isEmpty() ? null : o.category());
+			counted += o.kills();
+		}
+		return sum + Math.max(0, detail.kills() - counted);
+	}
+
+	/** The mechanical parts of the two swap PvPs (Wing and Air share them, see RatingWeights.Air). */
+	private static List<Part> swapSkillParts(Double swapSpeed, Double swapReliability, Double momentum, Double aim) {
+		return List.of(new Part("Swap speed", swapSpeed, RatingWeights.Skill.SWAP_SPEED),
+				new Part("Swap reliability", swapReliability, RatingWeights.Skill.SWAP_RELIABILITY),
+				new Part("Momentum", momentum, RatingWeights.Skill.MOMENTUM), new Part("Aim", aim, RatingWeights.Skill.AIM));
 	}
 
 	// ---- Ground: the composite, with movement guns for movement ----
@@ -268,7 +343,9 @@ public final class Ratings {
 		Double overall = movement != null && aim != null ? weighted(parts) : null;
 		if (aim != null) breakdown.add(String.format("  aim: %.0f (%.2f)", aim, aimWeight));
 		if (overall == null) breakdown.add("  overall needs both movement and aim");
-		return new Result(aim, movement, overall, parts, breakdown);
+		Double[] extra = skillAndPerformance(detail, category, List.of(new Part("Movement", movement, RatingWeights.Skill.GROUND_MOVEMENT), new Part("Aim", aim, RatingWeights.Skill.AIM)),
+				movement != null && aim != null, "movement and aim", breakdown);
+		return new Result(aim, movement, overall, parts, breakdown, false, false, extra[0], extra[1]);
 	}
 
 	/**
@@ -310,7 +387,9 @@ public final class Ratings {
 		Double overall = kd != null && (gunAim != null || melee != null) ? weighted(parts) : null;
 		if (gunAim != null) breakdown.add(String.format("  gun aim: %.0f (%.2f)", gunAim, aimWeight));
 		if (overall == null) breakdown.add("  overall needs K/D and gun aim or melee");
-		return new Result(gunAim, melee, overall, parts, breakdown);
+		Double[] extra = skillAndPerformance(detail, category, List.of(new Part("Gun aim", gunAim, RatingWeights.Skill.AIM), new Part("Melee", melee, RatingWeights.Skill.MELEE)),
+				gunAim != null || melee != null, "gun aim or melee", breakdown);
+		return new Result(gunAim, melee, overall, parts, breakdown, false, false, extra[0], extra[1]);
 	}
 
 	/**
@@ -344,18 +423,17 @@ public final class Ratings {
 	}
 
 	/**
-	 * Speed and reliability together: success rate x (1 / average swap time),
-	 * scored as the effective swap time it works out to (average / success
-	 * rate) - bestMs scores 100, worstMs 0. Used by Wing; Air can use it with
-	 * the AIR_ bounds.
+	 * The two swap stats: {speed, reliability}, each 0-100 from its own table (RatingWeights.swapSpeedScore from the average swap time,
+	 * swapReliabilityScore from the success rate = successes / attempts, canceled swaps not counted as attempts). The weights are
+	 * only for the breakdown lines.
 	 */
-	static double swapScore(int successes, int attempts, double avgMs, double bestMs, double worstMs, double weight, List<String> breakdown) {
+	static double[] swapScores(int successes, int attempts, double avgMs, double speedWeight, double reliabilityWeight, List<String> breakdown) {
 		double successRate = attempts > 0 ? (double) successes / attempts : 1.0;
-		double effectiveMs = avgMs / Math.max(0.01, successRate);
-		double score = clamp(100.0 * (worstMs - effectiveMs) / (worstMs - bestMs));
-		breakdown.add(String.format("  swap: %.0f (%.0f%% success, avg %.3fs = %.3fs effective) (%.2f)",
-				score, successRate * 100, avgMs / 1000, effectiveMs / 1000, weight));
-		return score;
+		double speed = RatingWeights.swapSpeedScore(avgMs);
+		double reliability = RatingWeights.swapReliabilityScore(successRate);
+		breakdown.add(String.format("  swap speed: %.0f (average %.3fs) (%.2f)", speed, avgMs / 1000, speedWeight));
+		breakdown.add(String.format("  swap reliability: %.0f (%.0f%% success, %d of %d) (%.2f)", reliability, successRate * 100, successes, attempts, reliabilityWeight));
+		return new double[] { speed, reliability };
 	}
 
 	/** % of your speed kept through Wing swaps into an empty hotbar slot, or null without any. */
@@ -364,7 +442,7 @@ public final class Ratings {
 			breakdown.add("  momentum: no swaps into an empty slot yet");
 			return null;
 		}
-		double score = clamp(100.0 * avg.speedAfterBps() / avg.speedBeforeBps());
+		double score = clamp(100.0 * (avg.speedAfterBps() / avg.speedBeforeBps()) / RatingWeights.MOMENTUM_CEILING);
 		breakdown.add(String.format("  momentum: %.0f (%.1f -> %.1f b/s) (%.2f)", score, avg.speedBeforeBps(), avg.speedAfterBps(),
 				RatingWeights.Wing.MOMENTUM));
 		return score;
@@ -420,10 +498,8 @@ public final class Ratings {
 	// ---- Air: everything it tracks ----
 
 	/**
-	 * Air: the Air swap score (all four swap types together, on the AIR_
-	 * bounds), melee from Air combos, gun aim with the long-range weight, and
-	 * K/D. Movement is the swap score. There's no momentum part: momentum is
-	 * only recorded for Wing swaps.
+	 * Air, rated like Wing (RatingWeights.Air takes Wing's weights): swap speed and reliability over all four Air swap types
+	 * together, momentum through wingsuit swaps into an empty slot, aim (with melee from Air combos in it) and K/D.
 	 */
 	private static Result air(PlayerDetail detail, PvpCategory category, Double aim, List<String> breakdown) {
 		breakdown.add("Air rating - part: score (weight)");
@@ -435,12 +511,13 @@ public final class Ratings {
 			successes += s.successes();
 			if (s.avgMs() != null) totalMs += s.avgMs() * s.successes();
 		}
-		Double swap = null;
+		Double swapSpeed = null, swapReliability = null;
 		if (successes < need(RatingWeights.MIN_SWAPS)) {
 			breakdown.add("  swap: not enough swaps yet (" + RatingWeights.MIN_SWAPS + " successful)");
 		} else {
-			swap = shrink(swapScore(successes, attempts, totalMs / successes, RatingWeights.BEST_SWAP_MS, RatingWeights.WORST_SWAP_MS, RatingWeights.Air.SWAP, breakdown),
-					successes, RatingWeights.FULL_SWAPS);
+			double[] scores = swapScores(successes, attempts, totalMs / successes, RatingWeights.Air.SWAP_SPEED, RatingWeights.Air.SWAP_RELIABILITY, breakdown);
+			swapSpeed = shrink(scores[0], successes, RatingWeights.FULL_SWAPS);
+			swapReliability = shrink(scores[1], successes, RatingWeights.FULL_SWAPS);
 		}
 		// Momentum, over all Air swap types together: speed after / speed before, weighted by the swaps that have both.
 		double before = 0, after = 0;
@@ -453,22 +530,24 @@ public final class Ratings {
 		}
 		Double momentum = null;
 		if (moving > 0 && before > 0) {
-			momentum = clamp(100.0 * after / before);
+			momentum = clamp(100.0 * (after / before) / RatingWeights.MOMENTUM_CEILING);
 			breakdown.add(String.format("  momentum: %.0f (%.1f -> %.1f b/s over %d swaps) (%.2f)", momentum, before / moving, after / moving, moving,
 					RatingWeights.Air.MOMENTUM));
 		} else {
 			breakdown.add("  momentum: no wingsuit swaps into an empty slot yet");
 		}
-		Part swapPart = new Part("Swap", swap, RatingWeights.Air.SWAP);
+		Part speedPart = new Part("Swap speed", swapSpeed, RatingWeights.Air.SWAP_SPEED);
+		Part reliabilityPart = new Part("Swap reliability", swapReliability, RatingWeights.Air.SWAP_RELIABILITY);
 		Part momentumPart = new Part("Momentum", momentum, RatingWeights.Air.MOMENTUM);
-		Double movement = weighted(swapPart, momentumPart);
+		Double movement = weighted(speedPart, reliabilityPart, momentumPart);
 		Double kd = kdScore(detail, RatingWeights.Air.KD, breakdown);
 		double aimWeight = aimWeight(detail, category, RatingWeights.Air.AIM, breakdown);
-		List<Part> parts = List.of(swapPart, momentumPart, new Part("Aim", aim, aimWeight), new Part("K/D", kd, RatingWeights.Air.KD));
-		Double overall = swap != null && aim != null ? weighted(parts) : null;
+		List<Part> parts = List.of(speedPart, reliabilityPart, momentumPart, new Part("Aim", aim, aimWeight), new Part("K/D", kd, RatingWeights.Air.KD));
+		Double overall = swapSpeed != null && aim != null ? weighted(parts) : null;
 		if (aim != null) breakdown.add(String.format("  aim: %.0f (%.2f)", aim, aimWeight));
 		if (overall == null) breakdown.add("  overall needs both swap and aim");
-		return new Result(aim, movement, overall, parts, breakdown);
+		Double[] extra = skillAndPerformance(detail, category, swapSkillParts(swapSpeed, swapReliability, momentum, aim), swapSpeed != null && aim != null, "swaps and aim", breakdown);
+		return new Result(aim, movement, overall, parts, breakdown, false, false, extra[0], extra[1]);
 	}
 
 	private static double clamp(double value) {

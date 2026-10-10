@@ -7,9 +7,13 @@ import net.minecraft.item.ItemStack;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.Deque;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -17,71 +21,96 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * What the players around you are wearing, always: every SCAN_NANOS each loaded player's five slots (head, chest, legs, feet,
- * main hand) are noted and kept for KEEP_NANOS, then dropped. When a fight starts (FightTracker) that history is copied
- * out - each player's gear at that moment, and whether a jetpack and/or wingsuit was worn at any time in those seconds - and
- * tracking goes on until the fight ends, so someone who swaps between a jetpack and a wingsuit mid-fight is seen doing both.
- * When it ends, onFightEnd(opponent) classifies that opponent from everything seen on them (see classify) and hands back their
- * gear. Only the chest slot decides the class: the hotbar of other players is never sent to us.
+ * Who is around you and what they are doing, always. Every SCAN_NANOS each player within RANGE blocks is looked at: their five
+ * visible slots (head, chest, legs, feet, main hand), what their chest slot holds (a jetpack, a wingsuit or neither) and from that
+ * the kind of PvP they are doing - Ground, Wing, JP, or Air when both a jetpack and a wingsuit were worn in the last KEEP_NANOS.
+ * Each change of the chest slot is a swap. All of it is kept for KEEP_NANOS, then dropped, and a player who leaves the range loses
+ * their data, so a saved window always means "in range for that long".
+ *
+ * When a fight starts (FightTracker) those windows join it and tracking goes on until it ends. onFightEnd(opponent) then hands back
+ * the opponent's gear and class (jetpack and wingsuit both seen = Air) and their timeline (see trackJson), plus the others nearby.
+ * Only the chest slot decides the type: other players' hotbars are never sent to us.
+ *
+ * To stay cheap: a look at a player is stored only when something changed, and players beyond RANGE cost one distance check.
  */
 public final class GearTracker {
 
 	public static final GearTracker INSTANCE = new GearTracker();
 
 	private static final long SCAN_NANOS = 250_000_000L;
-	private static final long KEEP_NANOS = 20_000_000_000L;
+	private static final long KEEP_NANOS = 10_000_000_000L;
+	/** How far away a player still counts as around you (what the server sends is about this far). */
+	public static final double RANGE = 40.0;
 	private static final int SLOTS = 5;
+	/** The most entries of each list stored with a fight, and the longest the text may be (the backend keeps up to 2000). */
+	private static final int MAX_LIST = 25, MAX_JSON = 1800, MAX_OTHERS = 4;
 	private static final EquipmentSlot[] ORDER = { EquipmentSlot.HEAD, EquipmentSlot.CHEST, EquipmentSlot.LEGS, EquipmentSlot.FEET, EquipmentSlot.MAINHAND };
 
-	/** One look at a player: the five item names ("-" for empty) and whether the chest item is a jetpack / wingsuit. */
-	private record Sample(long nanos, String[] slots, boolean jetpack, boolean wingsuit) {}
+	/** What the chest slot holds. */
+	private enum Kind {
+		NONE('N'), JETPACK('J'), WINGSUIT('W');
 
-	/** Everything seen on one player since the fight started (and the 20 s before it). */
-	private static final class Sighting {
-		String name;
-		String[] startSlots;
-		String[] lastSlots;
-		boolean jetpack, wingsuit;
-		final Set<String> chests = new LinkedHashSet<>();
-		/** Every helmet, pair of pants and pair of boots seen (not used yet; kept for later). */
-		final Set<String> heads = new LinkedHashSet<>(), legs = new LinkedHashSet<>(), feet = new LinkedHashSet<>();
+		final char code;
+
+		Kind(char code) {
+			this.code = code;
+		}
 	}
 
-	/** An opponent as classified at the end of a fight. category is a PvpCategory name. */
+	/** The five item names ("-" for empty) and the chest kind as of a moment; valid until the next look. */
+	private record Look(long nanos, String[] slots, Kind kind) {}
+
+	private record Swap(long nanos, Kind from, Kind to) {}
+
+	private record TypeChange(long nanos, PvpCategory type) {}
+
+	/** One player within range. */
+	private static final class Track {
+		String name;
+		final Deque<Look> looks = new ArrayDeque<>();
+		final Deque<Swap> swaps = new ArrayDeque<>();
+		final Deque<TypeChange> types = new ArrayDeque<>();
+		Kind kind = null;
+		PvpCategory type = null;
+		long lastSeen;
+		double minDistance = Double.MAX_VALUE;
+		/** In a fight: everything is kept, and these gather what was worn (from the window and the fight). */
+		boolean inFight;
+		boolean jetpack, wingsuit;
+		final Set<String> chests = new LinkedHashSet<>(), heads = new LinkedHashSet<>(), legs = new LinkedHashSet<>(), feet = new LinkedHashSet<>();
+		String[] startSlots, lastSlots;
+	}
+
+	/** An opponent at the end of a fight. category is a PvpCategory name; trackJson is their timeline (stored in fights.opponent_track). */
 	public record OpponentGear(String category, String[] atStart, String[] atEnd, List<String> chests,
-			List<String> heads, List<String> legs, List<String> feet) {
-		/** Short JSON text for the backend: { "start": [...], "end": [...], "chests": [...] }. */
+			List<String> heads, List<String> legs, List<String> feet, String trackJson, String summary) {
+		/** Short JSON text for the backend: { "start": [...], "end": [...], "chests": [...], "heads": [...], "legs": [...], "feet": [...] }. */
 		public String json() {
 			com.google.gson.JsonObject o = new com.google.gson.JsonObject();
-			com.google.gson.JsonArray start = new com.google.gson.JsonArray(), end = new com.google.gson.JsonArray(), chestList = new com.google.gson.JsonArray();
-			for (String s : atStart) start.add(s);
-			for (String s : atEnd) end.add(s);
-			for (String s : chests) chestList.add(s);
-			o.add("start", start);
-			o.add("end", end);
-			o.add("chests", chestList);
+			o.add("start", strings(Arrays.asList(atStart)));
+			o.add("end", strings(Arrays.asList(atEnd)));
+			o.add("chests", strings(chests));
 			o.add("heads", strings(heads));
 			o.add("legs", strings(legs));
 			o.add("feet", strings(feet));
 			return o.toString();
 		}
 
-		private static com.google.gson.JsonArray strings(List<String> list) {
+		private static com.google.gson.JsonArray strings(Collection<String> list) {
 			com.google.gson.JsonArray array = new com.google.gson.JsonArray();
 			for (String s : list) array.add(s);
 			return array;
 		}
 
-		/** "Air (chest seen: Jetpack, Wingsuit)". */
+		/** "Air (chest seen: Jetpack, Wingsuit; 6 swaps, closest 4.2 blocks)". */
 		public String describe() {
-			return category + " (chest seen: " + (chests.isEmpty() ? "nothing" : String.join(", ", chests)) + ")";
+			return category + " (chest seen: " + (chests.isEmpty() ? "nothing" : String.join(", ", chests)) + "; " + summary + ")";
 		}
 	}
 
-	private final Map<String, Deque<Sample>> history = new HashMap<>();
-	private final Map<String, String> names = new HashMap<>();
-	/** Null outside a fight. */
-	private Map<String, Sighting> fight = null;
+	private final Map<String, Track> tracks = new HashMap<>();
+	private boolean fightActive = false;
+	private long fightStartNanos = 0L;
 	private long lastScanNanos = 0L;
 
 	private GearTracker() {}
@@ -96,102 +125,233 @@ public final class GearTracker {
 		lastScanNanos = now;
 		PlayerEntity me = client.player;
 		if (client.world == null || me == null) {
-			history.clear();
-			names.clear();
+			tracks.clear();
 			return;
 		}
 		Set<String> present = new HashSet<>();
 		for (PlayerEntity p : client.world.getPlayers()) {
 			if (p == me) continue;
+			double distance = me.distanceTo(p);
+			if (distance > RANGE) continue; // out of range: no data (an existing track is dropped below unless a fight is on)
 			String name = p.getName().getString();
 			String key = key(name);
 			present.add(key);
-			names.put(key, name);
+			Track t = tracks.computeIfAbsent(key, k -> {
+				Track created = new Track();
+				created.inFight = fightActive;
+				return created;
+			});
+			t.name = name;
+			t.lastSeen = now;
+			t.minDistance = Math.min(t.minDistance, distance);
 			String[] slots = new String[SLOTS];
-			boolean jetpack = false, wingsuit = false;
+			Kind kind = Kind.NONE;
 			for (int i = 0; i < SLOTS; i++) {
 				ItemStack stack = p.getEquippedStack(ORDER[i]);
 				slots[i] = stack.isEmpty() ? "-" : stack.getName().getString();
-				if (ORDER[i] == EquipmentSlot.CHEST) {
-					jetpack = PvpCategory.isWornJetpack(stack);
-					wingsuit = PvpCategory.isWingsuit(stack);
+				if (ORDER[i] == EquipmentSlot.CHEST) kind = PvpCategory.isWornJetpack(stack) ? Kind.JETPACK : PvpCategory.isWingsuit(stack) ? Kind.WINGSUIT : Kind.NONE;
+			}
+			Look last = t.looks.peekLast();
+			if (last == null || last.kind() != kind || !Arrays.equals(last.slots(), slots)) {
+				t.looks.addLast(new Look(now, slots, kind));
+				if (t.inFight) {
+					if (t.startSlots == null) t.startSlots = slots;
+					gather(t, slots, kind);
 				}
 			}
-			Sample sample = new Sample(now, slots, jetpack, wingsuit);
-			Deque<Sample> samples = history.computeIfAbsent(key, k -> new ArrayDeque<>());
-			samples.addLast(sample);
-			if (fight != null) {
-				Sighting s = fight.get(key);
-				if (s == null) {
-					s = new Sighting();
-					s.name = name;
-					s.startSlots = slots;
-					fight.put(key, s);
-				}
-				update(s, sample);
+			if (t.kind != null && t.kind != kind) t.swaps.addLast(new Swap(now, t.kind, kind));
+			t.kind = kind;
+			PvpCategory type = windowType(t, now);
+			if (type != t.type) {
+				t.type = type;
+				t.types.addLast(new TypeChange(now, type));
 			}
 		}
-		// The 20 second window: drop older looks, and players gone for that long.
-		for (java.util.Iterator<Map.Entry<String, Deque<Sample>>> it = history.entrySet().iterator(); it.hasNext();) {
-			Map.Entry<String, Deque<Sample>> entry = it.next();
-			Deque<Sample> samples = entry.getValue();
-			while (!samples.isEmpty() && now - samples.peekFirst().nanos() > KEEP_NANOS) samples.removeFirst();
-			if (samples.isEmpty()) {
+		// Gone or out of range: no data (unless a fight is on - they may be the opponent).
+		for (Iterator<Map.Entry<String, Track>> it = tracks.entrySet().iterator(); it.hasNext();) {
+			Map.Entry<String, Track> entry = it.next();
+			Track t = entry.getValue();
+			if (!present.contains(entry.getKey()) && !t.inFight) {
 				it.remove();
-				if (!present.contains(entry.getKey())) names.remove(entry.getKey());
+			} else if (!t.inFight) {
+				prune(t, now);
 			}
 		}
 	}
 
-	private static void update(Sighting s, Sample sample) {
-		s.jetpack |= sample.jetpack();
-		s.wingsuit |= sample.wingsuit();
-		s.lastSlots = sample.slots();
-		if (!sample.slots()[1].equals("-")) s.chests.add(sample.slots()[1]);
-		if (!sample.slots()[0].equals("-")) s.heads.add(sample.slots()[0]);
-		if (!sample.slots()[2].equals("-")) s.legs.add(sample.slots()[2]);
-		if (!sample.slots()[3].equals("-")) s.feet.add(sample.slots()[3]);
+	/** What a player's slots hold, added to what has been seen on them this fight. */
+	private static void gather(Track t, String[] slots, Kind kind) {
+		if (kind == Kind.JETPACK) t.jetpack = true;
+		if (kind == Kind.WINGSUIT) t.wingsuit = true;
+		if (!slots[0].equals("-")) t.heads.add(slots[0]);
+		if (!slots[1].equals("-")) t.chests.add(slots[1]);
+		if (!slots[2].equals("-")) t.legs.add(slots[2]);
+		if (!slots[3].equals("-")) t.feet.add(slots[3]);
+		t.lastSlots = slots;
 	}
 
-	/** A fight began: save the last 20 seconds of every player nearby and keep watching them. */
-	public void onFightStart() {
-		fight = new HashMap<>();
-		for (Map.Entry<String, Deque<Sample>> entry : history.entrySet()) {
-			Deque<Sample> samples = entry.getValue();
-			if (samples.isEmpty()) continue;
-			Sighting s = new Sighting();
-			s.name = names.getOrDefault(entry.getKey(), entry.getKey());
-			s.startSlots = samples.peekLast().slots();
-			for (Sample sample : samples) update(s, sample);
-			fight.put(entry.getKey(), s);
+	/** The PvP type of the last KEEP_NANOS: a jetpack and a wingsuit both worn = Air, one of them = JP / Wing, neither = Ground. */
+	private static PvpCategory windowType(Track t, long now) {
+		boolean jetpack = false, wingsuit = false;
+		Look[] looks = t.looks.toArray(new Look[0]);
+		for (int i = 0; i < looks.length; i++) {
+			long end = i + 1 < looks.length ? looks[i + 1].nanos() : now;
+			if (end < now - KEEP_NANOS) continue; // ended before the window
+			if (looks[i].kind() == Kind.JETPACK) jetpack = true;
+			if (looks[i].kind() == Kind.WINGSUIT) wingsuit = true;
+		}
+		if (jetpack && wingsuit) return PvpCategory.AIR;
+		if (jetpack) return PvpCategory.JP;
+		if (wingsuit) return PvpCategory.WING;
+		return PvpCategory.GROUND;
+	}
+
+	/** Drops what is older than the window; the look that was current when the window began stays. */
+	private static void prune(Track t, long now) {
+		long from = now - KEEP_NANOS;
+		while (t.looks.size() > 1) {
+			Iterator<Look> it = t.looks.iterator();
+			it.next();
+			if (it.next().nanos() > from) break;
+			t.looks.removeFirst();
+		}
+		while (!t.swaps.isEmpty() && t.swaps.peekFirst().nanos() < from) t.swaps.removeFirst();
+		while (t.types.size() > 1) {
+			Iterator<TypeChange> it = t.types.iterator();
+			it.next();
+			if (it.next().nanos() > from) break;
+			t.types.removeFirst();
 		}
 	}
 
-	/** The fight was dropped (no kill or death): forget what was saved. */
+	/** A fight began: the saved windows of everyone in range join it, and they are watched until it ends. */
+	public void onFightStart() {
+		long now = System.nanoTime();
+		fightActive = true;
+		fightStartNanos = now;
+		for (Track t : tracks.values()) {
+			prune(t, now);
+			t.inFight = true;
+			t.jetpack = t.wingsuit = false;
+			t.chests.clear();
+			t.heads.clear();
+			t.legs.clear();
+			t.feet.clear();
+			for (Look look : t.looks) gather(t, look.slots(), look.kind());
+			Look latest = t.looks.peekLast();
+			t.startSlots = latest != null ? latest.slots() : new String[SLOTS];
+			t.lastSlots = t.startSlots;
+		}
+	}
+
+	/** The fight was dropped (no kill or death): back to the plain window. */
 	public void onFightDrop() {
-		fight = null;
+		endFight();
+	}
+
+	private void endFight() {
+		fightActive = false;
+		for (Track t : tracks.values()) t.inFight = false;
 	}
 
 	/**
-	 * The fight ended against this opponent (null when unknown): their class and gear, or null if they were never seen. With no name,
-	 * the only player seen during the fight counts as the opponent.
+	 * The fight ended against this opponent (null when unknown): their class, gear and timeline, or null if they were never seen. With no
+	 * name, the only player seen during the fight counts as the opponent.
 	 */
 	public OpponentGear onFightEnd(String opponent) {
-		Map<String, Sighting> seen = fight;
-		fight = null;
-		if (seen == null) return null;
-		Sighting s = opponent != null ? seen.get(key(opponent)) : null;
-		if (s == null && opponent == null && seen.size() == 1) s = seen.values().iterator().next();
-		if (s == null || s.lastSlots == null) return null;
-		return new OpponentGear(classify(s).name(), s.startSlots, s.lastSlots, new ArrayList<>(s.chests),
-				new ArrayList<>(s.heads), new ArrayList<>(s.legs), new ArrayList<>(s.feet));
+		long now = System.nanoTime();
+		Track opp = opponent != null ? tracks.get(key(opponent)) : null;
+		if (opp != null && !opp.inFight) opp = null;
+		if (opp == null && opponent == null) {
+			Track only = null;
+			int count = 0;
+			for (Track t : tracks.values()) {
+				if (t.inFight) {
+					only = t;
+					count++;
+				}
+			}
+			if (count == 1) opp = only;
+		}
+		OpponentGear result = null;
+		if (opp != null && opp.lastSlots != null) {
+			if (opp.startSlots == null) opp.startSlots = opp.lastSlots;
+			PvpCategory type = opp.jetpack && opp.wingsuit ? PvpCategory.AIR : opp.jetpack ? PvpCategory.JP : opp.wingsuit ? PvpCategory.WING : PvpCategory.GROUND;
+			String json = trackJson(opp, now);
+			String summary = opp.swaps.size() + " swaps, closest " + String.format(Locale.ROOT, "%.1f", opp.minDistance) + " blocks";
+			result = new OpponentGear(type.name(), opp.startSlots, opp.lastSlots, new ArrayList<>(opp.chests), new ArrayList<>(opp.heads),
+					new ArrayList<>(opp.legs), new ArrayList<>(opp.feet), json, summary);
+			// Others in range, nearest first: name, type, closest distance.
+			List<Track> others = new ArrayList<>();
+			for (Track t : tracks.values()) if (t != opp && t.inFight && t.type != null) others.add(t);
+			others.sort((a, b) -> Double.compare(a.minDistance, b.minDistance));
+			com.google.gson.JsonObject parsed = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+			com.google.gson.JsonArray near = new com.google.gson.JsonArray();
+			for (int i = 0; i < others.size() && i < MAX_OTHERS; i++) {
+				Track t = others.get(i);
+				com.google.gson.JsonArray one = new com.google.gson.JsonArray();
+				one.add(t.name);
+				one.add(t.type.name());
+				one.add(Math.round(t.minDistance * 10.0) / 10.0);
+				near.add(one);
+			}
+			if (near.size() > 0) {
+				parsed.add("near", near);
+				result = new OpponentGear(result.category(), result.atStart(), result.atEnd(), result.chests(), result.heads(), result.legs(),
+						result.feet(), parsed.toString(), summary);
+			}
+		}
+		endFight();
+		for (Track t : tracks.values()) prune(t, now);
+		return result;
 	}
 
-	/** Both a jetpack and a wingsuit worn at some point = Air; one of them = JP / Wing; neither = Ground. */
-	private static PvpCategory classify(Sighting s) {
-		if (s.jetpack && s.wingsuit) return PvpCategory.AIR;
-		if (s.jetpack) return PvpCategory.JP;
-		if (s.wingsuit) return PvpCategory.WING;
-		return PvpCategory.GROUND;
+	/**
+	 * The opponent's timeline as short JSON: d closest distance, pre ms of data from before the fight (up to 10 s), t0 the type when the
+	 * fight began, types [[ms from the fight start, TYPE]...], swaps [[ms, "J>W"]...] (J jetpack, W wingsuit, N neither), ms time per type.
+	 * Negative times are before the fight started. Each list is cut to MAX_LIST entries, and further if the text is too long.
+	 */
+	private String trackJson(Track t, long now) {
+		long windowStart = Math.max(t.looks.isEmpty() ? now : t.looks.peekFirst().nanos(), fightStartNanos - KEEP_NANOS);
+		Map<PvpCategory, Long> time = new EnumMap<>(PvpCategory.class);
+		List<TypeChange> changes = new ArrayList<>(t.types);
+		for (int i = 0; i < changes.size(); i++) {
+			long from = Math.max(changes.get(i).nanos(), windowStart);
+			long to = i + 1 < changes.size() ? changes.get(i + 1).nanos() : now;
+			if (to > from) time.merge(changes.get(i).type(), to - from, Long::sum);
+		}
+		PvpCategory atStart = null;
+		for (TypeChange c : changes) if (c.nanos() <= fightStartNanos) atStart = c.type();
+		int limit = MAX_LIST;
+		String text;
+		do {
+			com.google.gson.JsonObject o = new com.google.gson.JsonObject();
+			o.addProperty("d", Math.round(t.minDistance * 10.0) / 10.0);
+			o.addProperty("pre", Math.max(0L, Math.min(KEEP_NANOS, fightStartNanos - windowStart)) / 1_000_000L);
+			if (atStart != null) o.addProperty("t0", atStart.name());
+			com.google.gson.JsonArray typeArray = new com.google.gson.JsonArray();
+			for (int i = 0; i < changes.size() && i < limit; i++) typeArray.add(pair(changes.get(i).nanos(), changes.get(i).type().name()));
+			o.add("types", typeArray);
+			com.google.gson.JsonArray swapArray = new com.google.gson.JsonArray();
+			int n = 0;
+			for (Swap s : t.swaps) {
+				if (n++ >= limit) break;
+				swapArray.add(pair(s.nanos(), s.from().code + ">" + s.to().code));
+			}
+			o.add("swaps", swapArray);
+			com.google.gson.JsonObject ms = new com.google.gson.JsonObject();
+			for (Map.Entry<PvpCategory, Long> e : time.entrySet()) ms.addProperty(e.getKey().name(), e.getValue() / 1_000_000L);
+			o.add("ms", ms);
+			text = o.toString();
+			limit = limit > 4 ? limit / 2 : 0;
+		} while (text.length() > MAX_JSON && limit > 0);
+		return text;
+	}
+
+	private com.google.gson.JsonArray pair(long nanos, String value) {
+		com.google.gson.JsonArray a = new com.google.gson.JsonArray();
+		a.add((nanos - fightStartNanos) / 1_000_000L);
+		a.add(value);
+		return a;
 	}
 }

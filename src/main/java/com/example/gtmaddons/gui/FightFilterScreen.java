@@ -22,12 +22,12 @@ import java.util.function.ToIntFunction;
 
 /**
  * Filter (from a player's stats page, or the Player Stats leaderboard): pick how
- * many fights (1 to 100) and, if you like, which opponents - as many as you want.
+ * many fights (1 to 500) and, if you like, which opponents - as many as you want.
  * Applied to the PvP tab you came from: the newest N fights of that PvP against
  * the chosen opponents (see FightFilter). With no opponent chosen it's everyone.
  * The opponents to choose from are handed in, so any page can use it.
  *
- *            Fights: [ slider 1-100 ] [-][+]
+ *            Fights: [ slider 1-500 ] [-][+]
  *            [ search opponents...        ]
  *            [x Alice (5)] [  Bob (3)  ]
  *            [  Cara (2) ] [ (unknown) ]
@@ -47,6 +47,15 @@ public class FightFilterScreen extends Screen {
 	/** How many fights a selection picks, for the live line; null when that isn't known (the leaderboard). */
 	private final ToIntFunction<FightFilter> matches;
 	private final Consumer<FightFilter> onApply;
+	/** What the leaderboard's Filter screen adds (null anywhere else): the column to rank by (index into sorts), the fewest fights a player needs to be listed, and whether to show every rating. */
+	public record LeaderboardOptions(List<String> sorts, int sort, int minFights, boolean showAll) {}
+	/** The values the leaderboard's min-fights buttons step through. */
+	private static final int[] MIN_FIGHTS_STEPS = { 0, 1, 3, 5, 10, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 250, 300, 400, 500 };
+	private final LeaderboardOptions options;
+	private final Consumer<LeaderboardOptions> onOptions;
+	private int sort, minFights;
+	private boolean showAll;
+	private ClickableWidget minLabel;
 	private final List<Opponent> everyone;
 	private final Set<String> selected = new HashSet<>();
 	private int limit;
@@ -58,6 +67,12 @@ public class FightFilterScreen extends Screen {
 
 	public FightFilterScreen(Screen parent, String scope, List<Opponent> opponents, FightFilter current,
 			ToIntFunction<FightFilter> matches, Consumer<FightFilter> onApply) {
+		this(parent, scope, opponents, current, matches, onApply, null, null);
+	}
+
+	/** For the leaderboard: also Rank by, All ratings and Min fights; onOptions is told the picks on Apply. */
+	public FightFilterScreen(Screen parent, String scope, List<Opponent> opponents, FightFilter current,
+			ToIntFunction<FightFilter> matches, Consumer<FightFilter> onApply, LeaderboardOptions options, Consumer<LeaderboardOptions> onOptions) {
 		super(Text.literal("Filter fights - " + scope));
 		this.parent = parent;
 		this.scope = scope;
@@ -66,14 +81,26 @@ public class FightFilterScreen extends Screen {
 		this.limit = current.limit();
 		this.selected.addAll(current.opponents());
 		this.everyone = opponents;
+		this.options = options != null && !options.sorts().isEmpty() ? options : null;
+		this.onOptions = onOptions;
+		if (this.options != null) {
+			this.sort = Math.max(0, Math.min(this.options.sorts().size() - 1, this.options.sort()));
+			this.minFights = Math.max(0, this.options.minFights());
+			this.showAll = this.options.showAll();
+		}
 	}
 
 	private int left() {
 		return width / 2 - WIDTH / 2;
 	}
 
+	/** The leaderboard's extra buttons (two rows) sit between the slider and the search box and push the rest down. */
+	private int searchY() {
+		return options != null ? 108 : 62;
+	}
+
 	private int gridTop() {
-		return 92;
+		return searchY() + 30;
 	}
 
 	private int rowsPerPage() {
@@ -91,7 +118,22 @@ public class FightFilterScreen extends Screen {
 		addDrawableChild(ButtonWidget.builder(Text.literal("+"), b -> slider.set(limit + 1))
 				.dimensions(x + WIDTH - 20, 30, 20, 20).build());
 
-		TextFieldWidget field = addDrawableChild(new TextFieldWidget(textRenderer, x, 62, WIDTH, 20, Text.literal("Search opponents")));
+		if (options != null) {
+			int half = (WIDTH - GAP) / 2;
+			addDrawableChild(ButtonWidget.builder(Text.literal("Rank by: " + options.sorts().get(sort)), b -> {
+				sort = (sort + 1) % options.sorts().size();
+				b.setMessage(Text.literal("Rank by: " + options.sorts().get(sort)));
+			}).dimensions(x, 56, half, 20).build());
+			addDrawableChild(ButtonWidget.builder(Text.literal("All ratings: " + (showAll ? "ON" : "OFF")), b -> {
+				showAll = !showAll;
+				b.setMessage(Text.literal("All ratings: " + (showAll ? "ON" : "OFF")));
+			}).dimensions(x + half + GAP, 56, half, 20).build());
+			addDrawableChild(ButtonWidget.builder(Text.literal("-"), b -> stepMinFights(-1)).dimensions(x, 82, 20, 20).build());
+			minLabel = addDrawableChild(ButtonWidget.builder(Text.literal(minFightsText()), b -> stepMinFights(1)).dimensions(x + 20 + GAP, 82, WIDTH - 2 * (20 + GAP), 20).build());
+			addDrawableChild(ButtonWidget.builder(Text.literal("+"), b -> stepMinFights(1)).dimensions(x + WIDTH - 20, 82, 20, 20).build());
+		}
+
+		TextFieldWidget field = addDrawableChild(new TextFieldWidget(textRenderer, x, searchY(), WIDTH, 20, Text.literal("Search opponents")));
 		field.setMaxLength(16);
 		field.setPlaceholder(Text.literal("Search opponents...").formatted(Formatting.GRAY));
 		field.setText(search);
@@ -164,8 +206,24 @@ public class FightFilterScreen extends Screen {
 		gridWidgets.add(next);
 	}
 
+	private String minFightsText() {
+		return minFights == 0 ? "Min fights: any" : "Min fights: " + minFights;
+	}
+
+	/** Moves the fewest-fights value to the next (or previous) step; stepping up past the last wraps to "any". */
+	private void stepMinFights(int direction) {
+		int at = 0;
+		for (int i = 0; i < MIN_FIGHTS_STEPS.length; i++) if (MIN_FIGHTS_STEPS[i] <= minFights) at = i;
+		int next = at + direction;
+		if (next < 0) next = 0;
+		if (next >= MIN_FIGHTS_STEPS.length) next = 0;
+		minFights = MIN_FIGHTS_STEPS[next];
+		if (minLabel != null) minLabel.setMessage(Text.literal(minFightsText()));
+	}
+
 	private void apply() {
 		client.setScreen(parent);
+		if (onOptions != null && options != null) onOptions.accept(new LeaderboardOptions(options.sorts(), sort, minFights, showAll));
 		onApply.accept(new FightFilter(limit, selected));
 	}
 
@@ -203,7 +261,7 @@ public class FightFilterScreen extends Screen {
 		}
 	}
 
-	/** Fights 1-100. */
+	/** Fights 1-500. */
 	private final class LimitSlider extends SliderWidget {
 		LimitSlider(int x, int y, int w) {
 			super(x, y, w, 20, Text.empty(), (limit - 1) / (double) (FightFilter.MAX_FIGHTS - 1));

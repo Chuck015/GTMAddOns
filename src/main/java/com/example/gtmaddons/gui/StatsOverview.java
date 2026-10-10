@@ -304,8 +304,7 @@ final class StatsOverview {
 		Ui.bigText(context, font, rate, x + 12 + font.getWidth(rateLabel), y + 20, scale, rate(success), false);
 		int timeW = Ui.bigWidth(font, time, scale);
 		Ui.bigText(context, font, time, x + w - 8 - timeW, y + 20, scale,
-				avg != null && avg.totalMs() != null ? Ui.swapTimeColor(avg.totalMs(), com.example.gtmaddons.rating.RatingWeights.BEST_SWAP_MS,
-						com.example.gtmaddons.rating.RatingWeights.WORST_SWAP_MS) : Ui.TEXT, false);
+				avg != null && avg.totalMs() != null ? Ui.scoreColor(com.example.gtmaddons.rating.RatingWeights.swapSpeedScore(avg.totalMs())) : Ui.TEXT, false);
 		context.drawTextWithShadow(font, timeLabel, x + w - 12 - timeW - font.getWidth(timeLabel), y + 26, Ui.LABEL);
 		context.fill(x + 6, y + 42, x + w - 6, y + 43, Ui.CARD_BORDER);
 

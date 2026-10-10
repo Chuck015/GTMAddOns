@@ -13,7 +13,7 @@ import net.minecraft.text.Text;
  * The GTMAddOns menu (/gao):
  *
  *            [  Player Stats   ]   everyone's stats
- *            [ Personal Stats  ]   your stats over your last 25/50/100 fights
+ *            [ Personal Stats  ]   your stats over your last 25 to 500 fights
  *            [    Settings     ]
  *            [      Done       ]
  *

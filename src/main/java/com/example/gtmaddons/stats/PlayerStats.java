@@ -32,8 +32,15 @@ public final class PlayerStats {
 			/** Ground PvP movement gun shots, one per gun (null from older backends). */
 			List<MovementGunStat> movementGuns,
 			/** Mouse movement and step averages over the successful Air swaps (null from older backends, or without any). */
-			Averages airAvg
+			Averages airAvg,
+			/** Average length (ms) of the fights you died in, in the view (null without deaths or from older backends). */
+			Double deathMs,
+			/** Kills and deaths by the opponent's PvP ("" = not known); null from older backends. The Results rating counts kills by it. */
+			List<OpponentOutcome> byOpponent
 	) {}
+
+	/** Your kills and deaths against opponents doing one PvP (category "" when it was not recorded). */
+	public record OpponentOutcome(String category, long kills, long deaths) {}
 
 	/** Speed (horizontal blocks/s) right after a movement gun's shots: how many, the average and the best. */
 	public record MovementGunStat(String gun, long shots, Double avgBps, Double bestBps) {}
@@ -71,7 +78,8 @@ public final class PlayerStats {
 	) {}
 
 	/** Totals for one gun in one PvP category (a PvpCategory name). */
-	public record GunStat(String category, String gun, long shots, long hits, long headshots, long kills, long lastUsed) {}
+	public record GunStat(String category, String gun, long shots, long hits, long headshots, long kills, long lastUsed,
+			long netShots, long netHits, long netHeadshots) {}
 
 	/** Air PvP swaps of one type (a swap type name, or null for failed/canceled attempts). */
 	public record AirSwapStat(String swapType, int total, int successes, int cancels, Double avgMs, Double bestMs,
@@ -103,6 +111,9 @@ public final class PlayerStats {
 
 	public record FlagRules(java.util.List<FlagRule> rules) {}
 
+	/** The answer to an admin notice (POST /admin/notify): who it is for (targeted, of whom online now), the version a bulk notice is about, names not found. */
+	public record NoticeResult(int id, String mode, int targeted, int online, String targetVersion, java.util.List<String> unknownNames) {}
+
 	/** A player with at least one warning flag (GET /admin/flagged), with all their flags. */
 	public record FlaggedPlayer(String uuid, String name, java.util.List<Flag> flags) {}
 
@@ -111,12 +122,15 @@ public final class PlayerStats {
 	// ---- Raw fights (GET /players/:uuid/fights) ----
 	// What the fight log, per-fight ratings and custom filters are built from; see FightStats.
 
-	/** A player's last 100 fights, newest first. */
+	/** A player's stored fights (up to 500 per PvP category), newest first. */
 	public record FightHistory(String uuid, String name, long firstSeen, long lastSeen, List<FightData> fights) {}
 
-	/** One finished fight: how it went and everything recorded in it. Lists may be null from an odd reply - use the accessors below. */
-	public record FightData(String fightKey, long startedAt, long endedAt, String outcome, String opponent, String category,
-			List<SwapRow> swaps, List<GunRow> guns, List<ComboRow> combos) {
+	/**
+	 * One finished fight: how it went and everything recorded in it. Lists may be null from an odd reply - use the accessors below.
+	 * id is the backend's own number for it (later fights have higher ones); null from a backend that does not send it.
+	 */
+	public record FightData(String fightKey, long startedAt, long endedAt, String outcome, String opponent, String category, String opponentCategory,
+			List<SwapRow> swaps, List<GunRow> guns, List<ComboRow> combos, Long id) {
 		public boolean won() {
 			return "KILL".equals(outcome);
 		}
@@ -157,7 +171,7 @@ public final class PlayerStats {
 
 	/** One gun's totals in one PvP category in a fight. speed* are set for movement guns only. */
 	public record GunRow(String category, String gun, long shots, long hits, long headshots, long kills,
-			Long speedShots, Double speedTotalBps, Double speedBestBps) {}
+			Long speedShots, Double speedTotalBps, Double speedBestBps, Long netShots, Long netHits, Long netHeadshots) {}
 
 	/** Combo totals for one PvP category in a fight. First hits are null for fights before they were counted. */
 	public record ComboRow(String category, long enemyCombos, long enemyBroken, long ownCombos, long ownBroken,

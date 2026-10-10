@@ -3,13 +3,13 @@ package com.example.gtmaddons.gui;
 import com.example.gtmaddons.Settings;
 
 /**
- * The 25 / 50 / 100 fights choice of the stats screens, remembered between menus: Personal Stats, the leaderboard and
+ * The 25 / 50 / 100 / 250 / 500 fights choice of the stats screens, remembered between menus: Personal Stats, the leaderboard and
  * other players' profiles all open on it, and picking one on any of them sets it for all (and for next time - it is
  * saved in Settings). A custom Filter... is not remembered.
  */
 public final class FightViews {
 
-	public static final int[] OPTIONS = { 25, 50, 100 };
+	public static final int[] OPTIONS = { 25, 50, 100, 250, 500 };
 
 	private static Settings settings;
 

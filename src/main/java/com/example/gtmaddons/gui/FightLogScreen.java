@@ -67,7 +67,7 @@ public class FightLogScreen extends Screen {
 		rebuild();
 	}
 
-	/** Works out every shown fight's ratings (cheap: at most 100 fights). */
+	/** Works out every shown fight's ratings (cheap: at most 500 fights of a category). */
 	private void rebuild() {
 		List<FightData> all = history.fights();
 		List<Row> out = new ArrayList<>();

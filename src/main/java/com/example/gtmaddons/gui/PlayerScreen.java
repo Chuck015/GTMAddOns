@@ -31,7 +31,7 @@ import java.util.Map;
  * that stat (see InsightScreen) with the numbers behind it.
  *
  * All stats come from the player's fights (combat tag to kill or death).
- * The buttons above Back switch between their last 25, 50 or 100 fights
+ * The buttons above Back switch between their last 25, 50, 100, 250 or 500 fights
  * (loaded from the backend the first time each is picked), and between
  * guns grouped by type (Rifle, Sniper, SMG...) and every gun on its own.
  * The subtitle shows how many fights and the kills and deaths.
@@ -45,7 +45,7 @@ public class PlayerScreen extends Screen {
 	private static final int TAB_WIDTH = 60;
 	private static final int TAB_GAP = 4;
 	/** How many of the player's last fights each view button shows; the first is what's passed in. */
-	private static final int[] FIGHT_VIEWS = { 25, 50, 100 };
+	private static final int[] FIGHT_VIEWS = FightViews.OPTIONS;
 
 	private final Screen parent;
 	private final StatsClient stats;
@@ -63,7 +63,7 @@ public class PlayerScreen extends Screen {
 	private PvpCategory selected;
 	/** Tab last opened on another player's page (Personal Stats saves its own in Settings). */
 	private static PvpCategory lastViewedTab = PvpCategory.WING;
-	/** The player's raw last 100 fights, loaded the first time the fight log or a filter is opened. */
+	/** The player's stored fights (up to 500 per category), loaded the first time the fight log or a filter is opened. */
 	private FightHistory history = null;
 	/** A custom selection (Filter...), or null for the 25 / 50 / 100 quick views. While set, viewFights is -1. */
 	private FightFilter filter = null;
@@ -193,10 +193,10 @@ public class PlayerScreen extends Screen {
 
 	/**
 	 * Above the Back button, two rows:
-	 *   [25 fights][50 fights][100 fights]  [Filter...]
+	 *   [25 fights][50 fights][100 fights][250 fights][500 fights]  [Filter...]
 	 *   [Fight log]  [Individual gun stats: OFF]
-	 * Filter picks a custom number of fights (1-100) and opponents; while
-	 * one is on, none of the three quick views is selected.
+	 * Filter picks a custom number of fights (1-500) and opponents; while
+	 * one is on, none of the quick views is selected.
 	 */
 	private void addViewControls() {
 		int viewWidth = 58, gap = 4, filterWidth = 84;

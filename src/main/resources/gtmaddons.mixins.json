@@ -4,6 +4,8 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "ClientPlayNetworkHandlerMixin",
+    "DroppedItemLabelMixin",
+    "ItemEntityRenderStateMixin",
     "HandledScreenAccessor",
     "InGameHudMixin",
     "LivingEntityInvoker",
@@ -11,6 +13,7 @@
     "NameTagMixin",
     "PlayerSneakAnimationMixin",
     "PlayerListHudMixin",
+    "RecipeBookMixin",
     "SoundSystemMixin",
     "SpriteContentsMixin"
   ],

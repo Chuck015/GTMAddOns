@@ -51,10 +51,14 @@ public final class FightStats {
 		Map<String, long[]> gunLastUsed = new LinkedHashMap<>();
 		Map<String, double[]> movement = new LinkedHashMap<>();
 		Map<String, long[]> comboTotals = new LinkedHashMap<>();
+		Map<String, long[]> byOpponent = new LinkedHashMap<>();
 
 		for (FightData fight : fights) {
 			if (fight.won()) kills++;
 			else if ("DEATH".equals(fight.outcome())) deaths++;
+			long[] against = byOpponent.computeIfAbsent(fight.opponentCategory() != null ? fight.opponentCategory() : "", k -> new long[2]);
+			if (fight.won()) against[0]++;
+			else if ("DEATH".equals(fight.outcome())) against[1]++;
 
 			for (SwapRow swap : fight.swapRows()) {
 				if ("WING".equals(swap.category())) wing.add(swap);
@@ -62,11 +66,14 @@ public final class FightStats {
 			}
 			for (GunRow gun : fight.gunRows()) {
 				String key = gun.category() + "\u0000" + gun.gun();
-				long[] t = gunTotals.computeIfAbsent(key, k -> new long[4]);
+				long[] t = gunTotals.computeIfAbsent(key, k -> new long[7]);
 				t[0] += gun.shots();
 				t[1] += gun.hits();
 				t[2] += gun.headshots();
 				t[3] += gun.kills();
+				t[4] += gun.netShots() != null ? gun.netShots() : 0L;
+				t[5] += gun.netHits() != null ? gun.netHits() : 0L;
+				t[6] += gun.netHeadshots() != null ? gun.netHeadshots() : 0L;
 				long[] last = gunLastUsed.computeIfAbsent(key, k -> new long[] { 0L });
 				last[0] = Math.max(last[0], fight.endedAt());
 
@@ -114,7 +121,7 @@ public final class FightStats {
 		for (Map.Entry<String, long[]> e : gunTotals.entrySet()) {
 			String[] key = e.getKey().split("\u0000", 2);
 			long[] t = e.getValue();
-			guns.add(new GunStat(key[0], key[1], t[0], t[1], t[2], t[3], gunLastUsed.get(e.getKey())[0]));
+			guns.add(new GunStat(key[0], key[1], t[0], t[1], t[2], t[3], gunLastUsed.get(e.getKey())[0], t[4], t[5], t[6]));
 		}
 		guns.sort(Comparator.comparingLong(GunStat::shots).reversed());
 		if (guns.size() > MAX_GUN_ROWS) guns = new ArrayList<>(guns.subList(0, MAX_GUN_ROWS));
@@ -141,7 +148,20 @@ public final class FightStats {
 		List<SwapRow> airGood = air.stream().filter(s -> "SUCCESS".equals(s.result())).toList();
 		return new PlayerDetail(history.uuid(), history.name(), history.firstSeen(), history.lastSeen(),
 				wing.size(), successes, failures, cancels, best, averages(good), recent, guns, airSwaps, combos,
-				fights.size(), kills, deaths, recentFights, movementGuns, airGood.isEmpty() ? null : averages(airGood));
+				fights.size(), kills, deaths, recentFights, movementGuns, airGood.isEmpty() ? null : averages(airGood), deathMs(fights),
+				byOpponent.entrySet().stream().map(e -> new PlayerStats.OpponentOutcome(e.getKey(), e.getValue()[0], e.getValue()[1])).toList());
+	}
+
+	/** The average length (ms) of the fights that ended in your death, or null if none did. */
+	private static Double deathMs(List<FightData> fights) {
+		double sum = 0;
+		int n = 0;
+		for (FightData f : fights) {
+			if (!"DEATH".equals(f.outcome())) continue;
+			sum += f.endedAt() - f.startedAt();
+			n++;
+		}
+		return n > 0 ? sum / n : null;
 	}
 
 	/** Air swaps grouped by type (failed and canceled attempts have no type and group as null), with their momentum. */

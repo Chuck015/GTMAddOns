@@ -206,6 +206,10 @@ public class InsightScreen extends Screen {
 		ratings.add(ratingRow(Ratings.aimLabel(category), r.aim()));
 		ratings.add(ratingRow(Ratings.secondLabel(category), r.movement()));
 		ratings.add(ratingRow("Overall", r.overall()));
+		if (r.skill() != null || r.performance() != null) {
+			ratings.add(ratingRow("Mechanics", r.skill()));
+			ratings.add(ratingRow("Results", r.performance()));
+		}
 		left.add(new Section(category.label + " ratings (beta)", ratings));
 
 		List<Row> breakdown = new ArrayList<>();

@@ -72,6 +72,7 @@ public final class DevLogger {
 	private final NetLauncherDebugger netLauncher = new NetLauncherDebugger(this);
 	private final NearLogger near = new NearLogger(this);
 	private final EquipmentLogger equipment = new EquipmentLogger(this);
+	private final PveLogger pve = new PveLogger(this);
 	private com.example.gtmaddons.PvpCategory lastCategory = null;
 
 	// Shot detection
@@ -232,6 +233,7 @@ public final class DevLogger {
 		if (wants(DevFilter.NET_LAUNCHER)) netLauncher.onFrame(client);
 		near.onFrame();
 		if (wants(DevFilter.EQUIPMENT)) equipment.onFrame(client);
+		if (wants(DevFilter.BUSINESS)) pve.onFrame(client);
 		reportCategoryChange(client);
 
 		ClientPlayerEntity player = client.player;
@@ -477,6 +479,7 @@ public final class DevLogger {
 	public void onMessage(Text text, boolean actionBar) {
 		// Action bars reach the /near capture through onActionBar instead.
 		if (enabled && !actionBar) near.onMessage(text, false);
+		if (!actionBar && wants(DevFilter.PRICES)) pve.onChat(text.getString());
 		if (actionBar || !windowOpen() || !wants(DevFilter.MESSAGES)) return;
 		add("CHAT  " + describe(text));
 	}
@@ -548,10 +551,30 @@ public final class DevLogger {
 	}
 
 	/** A finished fight's opponent, as classified from their gear (see GearTracker): a chat line and a block in the log. */
-	public void fightGear(String opponent, String description, String json) {
+	public void fightGear(String opponent, String description, String json, String trackJson) {
 		if (!wants(DevFilter.FIGHTS)) return;
 		chat("Opponent " + (opponent != null ? opponent : "(unknown)") + " looked like: " + description, Formatting.GRAY);
-		writeBlock("FIGHT GEAR  " + (opponent != null ? opponent : "(unknown)"), List.of(description, json));
+		writeBlock("FIGHT GEAR  " + (opponent != null ? opponent : "(unknown)"), List.of(description, json, "track: " + trackJson));
+	}
+
+	/** A screen was opened (or resized): the business information catcher looks at it (see PveLogger). */
+	public void onScreenOpened(net.minecraft.client.gui.screen.Screen screen) {
+		if (wants(DevFilter.BUSINESS)) pve.onScreenOpened(client(), screen);
+	}
+
+	/** Appends a block to gtmaddons-pve.log (the PVE tab's file). Nothing in QA mode, which never writes to disk. */
+	void writePve(String title, List<String> blockLines) {
+		if (!saveLog) return;
+		StringBuilder out = new StringBuilder();
+		out.append("==== ").append(LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)).append("  ").append(title).append(" ====\n");
+		for (String line : blockLines) out.append(line).append('\n');
+		out.append('\n');
+		try {
+			Files.writeString(logPath().resolveSibling("gtmaddons-pve.log"), out.toString(), StandardCharsets.UTF_8,
+					StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+		} catch (IOException e) {
+			LOGGER.warn("GTMAddOns: couldn't write the PVE log: {}", e.toString());
+		}
 	}
 
 	void add(String line) {

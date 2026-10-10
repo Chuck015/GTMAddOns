@@ -37,6 +37,9 @@ import java.util.regex.Pattern;
  * dropped and nothing from it is kept. After a kill while still tagged, a
  * new fight starts straight away.
  *
+ * Your own swaps from the PRE_FIGHT_MILLIS before a fight starts join it: the tag only starts with the first hit, and
+ * the swap you made to land that hit (a wingsuit swap before a net, say) is part of the fight.
+ *
  * Call onMessage and onFrame before CombatTracker's, so a death is seen
  * before it clears the tag.
  */
@@ -81,11 +84,14 @@ public final class FightTracker {
 	 */
 	public record Fight(String key, long startedAt, long endedAt, String outcome, String opponent, PvpCategory category,
 			List<SwapRecord> swaps, List<ShotResult> shots, List<ComboTracker.ComboResult> combos,
-			String opponentCategory, String opponentGear, MovementInputTracker.Stats movementInput) {}
+			String opponentCategory, String opponentGear, MovementInputTracker.Stats movementInput, String opponentTrack,
+			boolean netEnded) {}
 
 	private static final class Current {
 		final long startedAt = System.currentTimeMillis();
 		final PvpCategory category;
+		/** Cut at a conceded Net Launcher net (NetFightEnd). */
+		boolean netEnded = false;
 
 		Current(PvpCategory category) {
 			this.category = category;
@@ -125,7 +131,15 @@ public final class FightTracker {
 	private static final long CLOSE_GRACE_NANOS = 400_000_000L;
 	private static final long SHOT_GRACE_MILLIS = 100L;
 
+	/** Swaps made this long before a fight starts are counted in it. */
+	private static final long PRE_FIGHT_MILLIS = 10_000L;
+
 	private final List<Consumer<Fight>> listeners = new ArrayList<>();
+	/** Shots fired this long before a fight starts are counted in it: the hit that starts the tag is itself fired before the tag. */
+	private static final long PRE_FIGHT_SHOT_MILLIS = 2_000L;
+	private final List<ShotResult> recentShots = new ArrayList<>();
+	/** Swaps made outside a fight, newest last; the next fight takes the ones from its last PRE_FIGHT_MILLIS. */
+	private final List<SwapRecord> recentSwaps = new ArrayList<>();
 	private final List<Closing> closing = new ArrayList<>();
 	private Current current = null;
 	/** When WASTED showed, while waiting for the subtitle naming the killer (-1 = not waiting). */
@@ -151,7 +165,14 @@ public final class FightTracker {
 	// ---- What gets recorded (only during a fight) ----
 
 	public void addSwap(SwapRecord swap) {
-		if (current != null) current.swaps.add(swap);
+		if (current != null) {
+			// Also one that began just before the fight and finished in it (its momentum is measured after it closes).
+			if (swap.ts() >= current.startedAt - PRE_FIGHT_MILLIS) current.swaps.add(swap);
+			return;
+		}
+		recentSwaps.add(swap);
+		long from = System.currentTimeMillis() - PRE_FIGHT_MILLIS;
+		recentSwaps.removeIf(s -> s.ts() < from);
 	}
 
 	public void addShot(ShotResult shot) {
@@ -163,7 +184,13 @@ public final class FightTracker {
 				return;
 			}
 		}
-		if (current != null) current.shots.add(shot);
+		if (current != null) {
+			if (shot.timestampMillis() >= current.startedAt - PRE_FIGHT_SHOT_MILLIS) current.shots.add(shot);
+			return;
+		}
+		recentShots.add(shot);
+		long from = System.currentTimeMillis() - PRE_FIGHT_SHOT_MILLIS;
+		recentShots.removeIf(s -> s.timestampMillis() < from);
 	}
 
 	public void addCombo(ComboTracker.ComboResult combo) {
@@ -257,9 +284,15 @@ public final class FightTracker {
 		ClientPlayerEntity player = MinecraftClient.getInstance().player;
 		PvpCategory category = player != null ? PvpCategory.classify(player) : PvpCategory.GROUND;
 		current = new Current(category);
+		// The swaps from just before the first hit belong to this fight.
+		for (SwapRecord swap : recentSwaps) if (swap.ts() >= current.startedAt - PRE_FIGHT_MILLIS) current.swaps.add(swap);
+		int before = current.swaps.size();
+		recentSwaps.clear();
+		for (ShotResult shot : recentShots) if (shot.timestampMillis() >= current.startedAt - PRE_FIGHT_SHOT_MILLIS) current.shots.add(shot);
+		recentShots.clear();
 		GearTracker.INSTANCE.onFightStart();
 		MovementInputTracker.INSTANCE.onFightStart();
-		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Fight started (" + category.label + ") - recording stats", Formatting.YELLOW);
+		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Fight started (" + category.label + ") - recording stats" + (before > 0 ? " (+" + before + " swap" + (before == 1 ? "" : "s") + " from the 10 s before)" : ""), Formatting.YELLOW);
 	}
 
 	private void end(String outcome, String opponent) {
@@ -274,7 +307,8 @@ public final class FightTracker {
 		String outcome = c.outcome, opponent = c.opponent;
 		Fight done = new Fight(UUID.randomUUID().toString().replace("-", ""), fight.startedAt, c.endedAt,
 				outcome, opponent, fight.category, List.copyOf(fight.swaps), List.copyOf(fight.shots), List.copyOf(fight.combos),
-				c.gear != null ? c.gear.category() : null, c.gear != null ? c.gear.json() : null, c.movement);
+				c.gear != null ? c.gear.category() : null, c.gear != null ? c.gear.json() : null, c.movement,
+				c.gear != null ? c.gear.trackJson() : null, fight.netEnded);
 		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) {
 			DevLogger.chat(String.format("Fight recorded (%s): %s%s | %.0fs | %d swaps, %d shots, %d combos",
 					done.category().label, outcome.equals("KILL") ? "kill" : "death", opponent != null ? (outcome.equals("KILL") ? " on " : " by ") + opponent : "",
@@ -282,12 +316,30 @@ public final class FightTracker {
 					Formatting.GREEN);
 		}
 		if (c.movement != null) DevLogger.INSTANCE.fightMovement(c.movement.describe(), c.movement.toJson().toString());
-		if (c.gear != null) DevLogger.INSTANCE.fightGear(opponent, c.gear.describe(), c.gear.json());
+		if (c.gear != null) DevLogger.INSTANCE.fightGear(opponent, c.gear.describe(), c.gear.json(), c.gear.trackJson());
 		for (Consumer<Fight> listener : listeners) listener.accept(done);
+	}
+
+	/** NetFightEnd: the netted player did not go for damage, so the fight ends at the net (a KILL for the netter, a DEATH for the netted). */
+	public void endAtNet(String outcome, String opponent) {
+		if (current == null) return;
+		current.netEnded = true;
+		end(outcome, opponent);
+		// Still tagged, so they restart inside the same tag: that is the next fight.
+		if (CombatTracker.INSTANCE.isTagged()) start();
+	}
+
+	/** NetFightEnd: a net from a netter under 2.5 hearts with no damage from either side - no winner, nothing recorded. */
+	public void dropAtNet(String reason) {
+		if (current == null) return;
+		drop(reason);
+		if (CombatTracker.INSTANCE.isTagged()) start();
 	}
 
 	private void drop(String reason) {
 		beforeFightEnds.run();
+		// Not a finished fight, but its swaps may still be the lead-up to the next one.
+		recentSwaps.addAll(current.swaps);
 		current = null;
 		GearTracker.INSTANCE.onFightDrop();
 		MovementInputTracker.INSTANCE.onFightDrop();

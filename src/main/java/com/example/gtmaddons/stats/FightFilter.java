@@ -13,7 +13,7 @@ import java.util.Set;
 
 /**
  * A custom selection of a player's fights for the stats pages: how many
- * (1 to 100) and, optionally, only fights against certain opponents.
+ * (1 to 500) and, optionally, only fights against certain opponents.
  *
  * Applied to one PvP tab's fights, newest first:
  *   1. only fights of that PvP category;
@@ -27,7 +27,7 @@ import java.util.Set;
  */
 public record FightFilter(int limit, Set<String> opponents) {
 
-	public static final int MAX_FIGHTS = 100;
+	public static final int MAX_FIGHTS = 500;
 
 	public FightFilter {
 		limit = Math.max(1, Math.min(MAX_FIGHTS, limit));

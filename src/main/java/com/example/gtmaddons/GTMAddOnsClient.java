@@ -176,6 +176,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		Updater.INSTANCE.start();
 		ModUsers.init(stats, settings);
 		JetpackParticles.init(settings);
+		RecipeBookHider.init(settings);
+		DroppedItemLabels.init(settings);
 		CobwebTransparency.init(settings);
 		com.example.gtmaddons.gui.FightViews.init(settings);
 		OldSneaking.init(settings);
@@ -192,10 +194,12 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			ModUsers.onFrame(client);
 			// Before CombatTracker, so a death is seen before it clears the tag.
 			GearTracker.INSTANCE.onFrame(client);
+			DroppedItemLabels.onFrame(client);
 			MovementInputTracker.INSTANCE.onFrame(client);
 			FightTracker.INSTANCE.onFrame(client);
 			CombatTracker.INSTANCE.onFrame(client);
 			ShotTracker.INSTANCE.onFrame(client);
+			NetFightEnd.INSTANCE.onFrame(client);
 			showUpdateNotice(client);
 			HitSounds.INSTANCE.onFrame(client);
 			ComboTracker.INSTANCE.onFrame(client);
@@ -247,6 +251,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 
 		ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
 			CombatTracker.INSTANCE.onScreenOpened(screen);
+			DevLogger.INSTANCE.onScreenOpened(screen);
 			if (settings.swapRecordButton && screen instanceof InventoryScreen) addSwapRecordButton(screen);
 			// AFTER_INIT also fires when the open screen is resized. Fabric
 			// clears the screen's listeners then, so re-register them, but
@@ -301,6 +306,11 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	/** Admin mode: what the backend knows about a player (see AdminPlayerInfoScreen). */
 	public CompletableFuture<PlayerStats.AdminPlayerInfo> fetchAdminPlayerInfo(String name) {
 		return stats.fetchAdminPlayerInfo(name);
+	}
+
+	/** Admin mode: sends a notice to players running the mod (see AdminNoticeScreen). */
+	public CompletableFuture<PlayerStats.NoticeResult> sendAdminNotice(java.util.List<String> names, String message) {
+		return stats.sendAdminNotice(names, message);
 	}
 
 	/** Admin mode: every player with a warning flag (see AdminFlaggedScreen). */
@@ -408,10 +418,51 @@ public class GTMAddOnsClient implements ClientModInitializer {
 
 	/** Opens the main menu. Called from a command, so it waits for the chat screen to close first. */
 	/** Update messages (see Updater), shown in chat once you're in a world. */
+	/** How often the update card is shown again while an update is waiting (found, or downloaded and waiting for the game to close). */
+	private static final long UPDATE_CARD_GAP_NANOS = 5L * 60 * 1_000_000_000L;
+	private long lastUpdateCardNanos = 0L;
+
+	/** Updater messages in one styled line, and the update card now and every 5 minutes while an update is waiting. */
 	private void showUpdateNotice(MinecraftClient client) {
 		if (client.player == null) return;
 		String notice = Updater.INSTANCE.takeNotice();
-		if (notice != null) client.player.sendMessage(Text.literal("[GTMAddOns] " + notice).formatted(Formatting.AQUA), false);
+		if (notice != null) {
+			Text line = Text.literal("✦ ").formatted(Formatting.AQUA).append(Text.literal("GTMAddOns » ").formatted(Formatting.AQUA)).append(Text.literal(notice).formatted(Formatting.GRAY));
+			client.player.sendMessage(line, false);
+		}
+		// A message an admin sent (Admin mode > Notify players), with the update button.
+		String adminNotice = AdminNotices.INSTANCE.take();
+		if (adminNotice != null) {
+			Text card = Text.literal("")
+					.append(Text.literal("▬".repeat(28)).formatted(Formatting.DARK_GRAY)).append("\n")
+					.append(Text.literal(" ✦ ").formatted(Formatting.AQUA)).append(Text.literal("GTMAddOns » ").formatted(Formatting.AQUA)).append(Text.literal(adminNotice).formatted(Formatting.WHITE)).append("\n ")
+					.append(Text.literal("[ UPDATE NOW ]").formatted(Formatting.GREEN).formatted(Formatting.BOLD).formatted(Formatting.UNDERLINE).styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent.RunCommand("/gao update")).withHoverEvent(new net.minecraft.text.HoverEvent.ShowText(Text.literal("Download the update now. It is installed when you close the game."))))).append("\n")
+					.append(Text.literal("▬".repeat(28)).formatted(Formatting.DARK_GRAY));
+			client.player.sendMessage(card, false);
+		}
+		Updater.State state = Updater.INSTANCE.state();
+		if (state != Updater.State.AVAILABLE && state != Updater.State.READY) {
+			lastUpdateCardNanos = 0L;
+			return;
+		}
+		long now = System.nanoTime();
+		if (lastUpdateCardNanos != 0L && now - lastUpdateCardNanos < UPDATE_CARD_GAP_NANOS) return;
+		lastUpdateCardNanos = now;
+		String latest = Updater.INSTANCE.latestVersion() != null ? Updater.INSTANCE.latestVersion() : "?";
+		net.minecraft.text.MutableText card = Text.literal("")
+				.append(Text.literal("▬".repeat(28)).formatted(Formatting.DARK_GRAY)).append("\n")
+				.append(Text.literal(" ✦ ").formatted(Formatting.AQUA)).append(Text.literal(state == Updater.State.READY ? "GTMAddOns " + latest + " is downloaded" : "GTMAddOns update available").formatted(Formatting.WHITE).formatted(Formatting.BOLD)).append("\n");
+		if (state == Updater.State.AVAILABLE) {
+			card = card.append(Text.literal(" " + Updater.modVersion() + " → ").formatted(Formatting.GRAY)).append(Text.literal(latest).formatted(Formatting.GREEN).formatted(Formatting.BOLD)).append("   ")
+					.append(Text.literal("[ UPDATE NOW ]").formatted(Formatting.GREEN).formatted(Formatting.BOLD).formatted(Formatting.UNDERLINE).styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent.RunCommand("/gao update")).withHoverEvent(new net.minecraft.text.HoverEvent.ShowText(Text.literal("Download the update now. It is installed when you close the game."))))).append("\n")
+					.append(Text.literal(" Downloads in the background and installs when you close the game.").formatted(Formatting.GRAY)).append("\n")
+					.append(Text.literal(" Reminder every 5 minutes until you update.").formatted(Formatting.DARK_GRAY)).append("\n");
+		} else {
+			card = card.append(Text.literal(" Close the game fully to finish installing it.").formatted(Formatting.GRAY)).append("\n")
+					.append(Text.literal(" Reminder every 5 minutes until then.").formatted(Formatting.DARK_GRAY)).append("\n");
+		}
+		card = card.append(Text.literal("▬".repeat(28)).formatted(Formatting.DARK_GRAY));
+		client.player.sendMessage(card, false);
 	}
 
 	private void openMainScreen() {
@@ -492,6 +543,24 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		stats.setShowUsers(on);
 	}
 
+	public boolean isDroppedItemNamesOn() {
+		return settings.droppedItemNames;
+	}
+
+	public void setDroppedItemNamesOn(boolean on) {
+		settings.droppedItemNames = on;
+		settings.save();
+	}
+
+	public boolean isHideRecipeBookOn() {
+		return settings.hideRecipeBook;
+	}
+
+	public void setHideRecipeBookOn(boolean on) {
+		settings.hideRecipeBook = on;
+		settings.save();
+	}
+
 	public boolean isBetterNearOn() {
 		return settings.betterNear;
 	}
@@ -567,7 +636,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		}
 		status.accept("Loading the leaderboard...");
 		PvpCategory tab = getLeaderboardTab();
-		stats.fetchLeaderboard(tab, com.example.gtmaddons.gui.FightViews.get(), java.util.Set.of()).whenComplete((board, error) -> {
+		stats.fetchLeaderboard(tab, com.example.gtmaddons.stats.FightFilter.MAX_FIGHTS, java.util.Set.of()).whenComplete((board, error) -> {
 			MinecraftClient client = MinecraftClient.getInstance();
 			// Runs on the game thread, after the chat screen has closed.
 			client.execute(() -> {
@@ -965,8 +1034,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			MovementInputTracker.Stats keys = MovementInputTracker.INSTANCE.finishSwapWindow();
 			if (keys != null) done = done.withAfterInput(Math.round(keys.w), Math.round(keys.a), Math.round(keys.s), Math.round(keys.d), Math.round(keys.ms), keys.strafeSwitches);
 		}
-		// Only the fight it was made in - not one that started during the window.
-		if (momentumInFight) FightTracker.INSTANCE.addSwap(done);
+		// The fight it was made in, or the one that started just after it (FightTracker counts the 10 s before a fight).
+		FightTracker.INSTANCE.addSwap(done);
 		SwapSession.INSTANCE.add(done);
 		if (settings.swapDebug) {
 			sendDebugReport(done);

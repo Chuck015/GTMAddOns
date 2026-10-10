@@ -29,12 +29,14 @@ public enum DevFilter {
 	NEAR(Group.GENERAL, "/near capture", "GTM's reply to /near, with timing and hover / click details"),
 	FIGHTS(Group.GENERAL, "Fights & combat tag", "Fight started / recorded / dropped and combat tag start / end, with reasons"),
 	CATEGORY(Group.GENERAL, "PvP category", "A line whenever your PvP category changes, and what it's based on"),
+	PRICES(Group.PVE, "Ingredient prices", "Chat messages naming the cotton seeds (common, uncommon, rare, legendary), watering can, pebbles, green dye, detergent or batteries: the dollar amounts in them, with the session's average, lowest and highest, and the whole message in gtmaddons-pve.log"),
+	BUSINESS(Group.PVE, "Business information", "Opening the pressing, dying, cutting, washing, pot machine, the soap dispenser or the vacuum: everything in the GUI is written to gtmaddons-pve.log, the book in the top middle slot first, then every other item with its lore and data"),
 	STALLS(Group.GENERAL, "Stalls", "Whenever the game freezes for over a quarter of a second: how long, when, whether a resource reload happened during it (server resource packs reload the game) and whether the connection was still up"),
 	EQUIPMENT(Group.GENERAL, "Equipment", "What every loaded player wears and holds (all six slots, with full item detail) whenever it changes, your own whole inventory, and how far away players are loaded in (the RANGE lines)");
 
 	/** The tab of the dev / QA menu a filter is on (same sections as the PVP settings). */
 	public enum Group {
-		WING("Wing"), JP("JP"), GENERAL("General");
+		WING("Wing"), JP("JP"), GENERAL("General"), PVE("PVE");
 
 		public final String label;
 

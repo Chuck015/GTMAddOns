@@ -118,22 +118,73 @@ public final class StatsClient {
 		}
 	}
 
-	/** One player's stats over their last `fights` fights (25, 50 or 100) of one PvP category. */
+	/** One player's stats over their last `fights` fights (25, 50, 100, 250 or 500) of one PvP category. */
 	public CompletableFuture<PlayerStats.PlayerDetail> fetchPlayer(String uuid, int fights, PvpCategory category) {
 		return get("/players/" + uuid + "?fights=" + fights + "&category=" + category.name(), PlayerStats.PlayerDetail.class);
 	}
 
+	/** Most pages read in one go when catching up with a player's fights (a page is 250 fights; a full history is 2000). */
+	private static final int MAX_SYNC_PAGES = 12;
+
 	/**
-	 * One player's raw last 100 fights (all PvP categories), for the fight log
-	 * and custom filters. Needs the backend's /players/:uuid/fights route;
-	 * an older backend answers HTTP 404.
+	 * One player's stored fights (all PvP categories, up to 500 of each), for the fight log and custom filters.
+	 * Only the fights stored since the last visit are read: the rest come from the copy in FightCache.
+	 * Needs the backend's /players/:uuid/fights route; an older backend answers HTTP 404.
 	 */
 	public CompletableFuture<PlayerStats.FightHistory> fetchFights(String uuid) {
-		return get("/players/" + uuid + "/fights", PlayerStats.FightHistory.class);
+		CompletableFuture<PlayerStats.FightHistory> future = new CompletableFuture<>();
+		if (!isConfigured()) {
+			future.completeExceptionally(new IOException("stats backend isn't configured"));
+			return future;
+		}
+		UUID account = currentAccount();
+		worker.execute(() -> {
+			try {
+				if (account == null) throw new IOException("no Minecraft account signed in");
+				nextLoginAttemptMillis = 0;
+				future.complete(syncFights(account, uuid));
+			} catch (Throwable e) {
+				future.completeExceptionally(e);
+			}
+		});
+		return future;
+	}
+
+	/** Reads the fights stored after the newest one held (everything, the first time), adds them to the held copy and keeps it. Worker thread. */
+	private PlayerStats.FightHistory syncFights(UUID account, String uuid) throws Exception {
+		FightCache.Entry held = FightCache.load(uuid);
+		List<PlayerStats.FightData> fights = held != null ? new ArrayList<>(held.fights()) : new ArrayList<>();
+		List<PlayerStats.FightData> fresh = new ArrayList<>();
+		long cursor = held != null ? held.cursor() : 0;
+		FightCache.Page page = null;
+		for (int pages = 0; pages < MAX_SYNC_PAGES; pages++) {
+			HttpResponse<String> response = authedRequest(account, "GET", "/players/" + uuid + "/fights?since=" + cursor, null, true);
+			if (response.statusCode() != 200) throw new IOException("HTTP " + response.statusCode() + errorSuffix(response.body()));
+			page = GSON.fromJson(response.body(), FightCache.Page.class);
+			if (page == null) throw new IOException("empty reply");
+			List<PlayerStats.FightData> sent = page.fights() != null ? page.fights() : List.of();
+			// A backend from before ?since= sends the whole list at once, newest first: use it as it is and keep no copy.
+			if (page.maxFights() <= 0) return new PlayerStats.FightHistory(page.uuid(), page.name(), page.firstSeen(), page.lastSeen(), sent);
+			// An admin removed some of this player's data since the copy was made: throw it away and read everything.
+			if (held != null && page.epoch() != held.epoch()) {
+				held = null;
+				fights.clear();
+				fresh.clear();
+				cursor = 0;
+				FightCache.forget(uuid);
+				continue;
+			}
+			fresh.addAll(sent);
+			cursor = Math.max(cursor, page.cursor());
+			if (!page.more()) break;
+		}
+		List<PlayerStats.FightData> merged = FightCache.merge(fights, fresh, page.maxFights());
+		FightCache.save(FightCache.entry(page, cursor, merged));
+		return new PlayerStats.FightHistory(page.uuid(), page.name(), page.firstSeen(), page.lastSeen(), merged);
 	}
 
 	/**
-	 * Everyone's stats for one PvP category over their newest `fights` fights (1-100), counting only
+	 * Everyone's stats for one PvP category over their newest `fights` fights (1-500), counting only
 	 * fights against `opponents` (names, any case) if that isn't empty. See Leaderboard for ranking them.
 	 * Needs the backend's /leaderboard route; an older backend answers HTTP 404.
 	 */
@@ -173,7 +224,17 @@ public final class StatsClient {
 		return get("/admin/player-info?name=" + java.net.URLEncoder.encode(name, java.nio.charset.StandardCharsets.UTF_8), PlayerStats.AdminPlayerInfo.class);
 	}
 
-	/** Admin mode: every player with a warning flag (the backend keeps the list for 15 minutes). */
+	/** Admin mode: sends a notice (names empty = everyone on an older mod version than the newest in use). Fails with HTTP 403 if this account is not an admin. */
+	public CompletableFuture<PlayerStats.NoticeResult> sendAdminNotice(java.util.List<String> names, String message) {
+		JsonObject body = new JsonObject();
+		body.addProperty("message", message);
+		com.google.gson.JsonArray list = new com.google.gson.JsonArray();
+		for (String name : names) list.add(name);
+		if (list.size() > 0) body.add("names", list);
+		return call("POST", "/admin/notify", body.toString(), PlayerStats.NoticeResult.class);
+	}
+
+	/** Admin mode: every player with a warning flag (the backend keeps the list for an hour). */
 	public CompletableFuture<PlayerStats.FlaggedPlayers> fetchAdminFlagged() {
 		return get("/admin/flagged", PlayerStats.FlaggedPlayers.class);
 	}
@@ -214,6 +275,11 @@ public final class StatsClient {
 
 	/** A request (any method) that answers HTTP 200 with JSON of this type. Runs on the worker thread. */
 	private <T> CompletableFuture<T> call(String method, String path, Class<T> type) {
+		return call(method, path, null, type);
+	}
+
+	/** The same with a JSON body. */
+	private <T> CompletableFuture<T> call(String method, String path, String jsonBody, Class<T> type) {
 		CompletableFuture<T> future = new CompletableFuture<>();
 		if (!isConfigured()) {
 			future.completeExceptionally(new IOException("stats backend isn't configured"));
@@ -226,7 +292,7 @@ public final class StatsClient {
 				// A failed login a moment ago shouldn't block someone opening
 				// the screen on purpose - let them retry straight away.
 				nextLoginAttemptMillis = 0;
-				HttpResponse<String> response = authedRequest(account, method, path, null);
+				HttpResponse<String> response = authedRequest(account, method, path, jsonBody);
 				if (response.statusCode() != 200) throw new IOException("HTTP " + response.statusCode() + errorSuffix(response.body()));
 				future.complete(GSON.fromJson(response.body(), type));
 			} catch (Throwable e) {
@@ -298,6 +364,8 @@ public final class StatsClient {
 		if (fight.opponent() != null) body.addProperty("opponent", fight.opponent());
 		if (fight.opponentCategory() != null) body.addProperty("opponent_category", fight.opponentCategory());
 		if (fight.opponentGear() != null) body.addProperty("opponent_gear", fight.opponentGear());
+		if (fight.opponentTrack() != null) body.addProperty("opponent_track", fight.opponentTrack());
+		if (fight.netEnded()) body.addProperty("net_ended", true);
 		if (fight.movementInput() != null) body.add("movement_input", fight.movementInput().toJson());
 		body.add("swaps", GSON.toJsonTree(fight.swaps()));
 		body.add("guns", GSON.toJsonTree(List.copyOf(guns.values())));
@@ -336,6 +404,8 @@ public final class StatsClient {
 		final String category;
 		final String gun;
 		int shots, hits, headshots, kills;
+		/** Shots fired at a player in a Net Launcher net, and how many of them hit / were headshots (see ShotTracker). */
+		int netShots, netHits, netHeadshots;
 		// Movement guns only: shots with a speed, their summed and best speed after the shot (blocks/s).
 		// Left null otherwise, so Gson leaves them out.
 		Integer speedShots;
@@ -351,6 +421,11 @@ public final class StatsClient {
 			if (shot.hit()) hits++;
 			if (shot.headshot()) headshots++;
 			if (shot.kill()) kills++;
+			if (shot.netted()) {
+				netShots++;
+				if (shot.hit()) netHits++;
+				if (shot.headshot()) netHeadshots++;
+			}
 			Double bps = shot.speedAfterBps();
 			if (bps != null) {
 				speedShots = speedShots == null ? 1 : speedShots + 1;
@@ -428,7 +503,12 @@ public final class StatsClient {
 			if (account == null) return;
 			long now = System.currentTimeMillis();
 			if (now - lastHeartbeatMillis >= HEARTBEAT_MS) {
-				if (authedRequest(account, "POST", "/presence", "{}").statusCode() == 200) lastHeartbeatMillis = now;
+				HttpResponse<String> beat = authedRequest(account, "POST", "/presence", "{}");
+				if (beat.statusCode() == 200) {
+					lastHeartbeatMillis = now;
+					// The answer carries any notice an admin sent this player.
+					com.example.gtmaddons.AdminNotices.INSTANCE.receive(beat.body());
+				}
 			}
 			if (!showUsers || pendingChecks.isEmpty()) return;
 			com.google.gson.JsonArray due = new com.google.gson.JsonArray();

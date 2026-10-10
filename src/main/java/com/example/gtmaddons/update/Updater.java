@@ -169,10 +169,7 @@ public final class Updater {
 		if (lastJoinCheckNanos != 0L && now - lastJoinCheckNanos < JOIN_CHECK_GAP_NANOS) return;
 		lastJoinCheckNanos = now;
 		if (state == State.IDLE || state == State.CHECKING || state == State.DOWNLOADING) return;
-		if (state == State.READY) {
-			notice = "GTMAddOns " + latestVersion + " is downloaded - close the game fully to install it.";
-			return;
-		}
+		if (state == State.READY) return; // the game side reminds the player (GTMAddOnsClient.showUpdateNotice)
 		// So a version the player was told about earlier is mentioned again this session.
 		notifiedVersion = null;
 		Thread thread = new Thread(() -> {
@@ -237,11 +234,7 @@ public final class Updater {
 		if (etag != null) request.header("If-None-Match", etag);
 		HttpResponse<String> response = http.send(request.GET().build(), HttpResponse.BodyHandlers.ofString());
 		if (response.statusCode() == 304) {
-			// Nothing changed since the last look - but an update found earlier is still worth mentioning (see onJoin).
-			if (state == State.AVAILABLE && latestVersion != null && !latestVersion.equals(notifiedVersion) && !required) {
-				notifiedVersion = latestVersion;
-				notice = "GTMAddOns " + latestVersion + " is out (you have " + modVersion() + "). Run /gao update or click Update in /gao.";
-			}
+			// Nothing changed since the last look.
 			return;
 		}
 		if (response.statusCode() != 200) {
@@ -285,12 +278,8 @@ public final class Updater {
 			assetSha256 = bestSha;
 			state = State.AVAILABLE;
 		}
-		if (bestBody.contains(AUTO_MARKER) || required) {
-			download();
-		} else if (!bestVersion.equals(notifiedVersion)) {
-			notifiedVersion = bestVersion;
-			notice = "GTMAddOns " + bestVersion + " is out (you have " + modVersion() + "). Run /gao update or click Update in /gao.";
-		}
+		if (bestBody.contains(AUTO_MARKER) || required) download();
+		// Otherwise the game side shows the update card now and every few minutes while state() is AVAILABLE (GTMAddOnsClient.showUpdateNotice).
 	}
 
 	/**

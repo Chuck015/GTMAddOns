@@ -16,6 +16,7 @@ import java.util.List;
  * @param category     which kind of PvP you were in when the shot was fired
  * @param speedBeforeBps movement guns only (else null): horizontal speed in blocks/s the frame before the shot
  * @param speedAfterBps  movement guns only (else null): peak horizontal speed in blocks/s just after it
+ * @param netted       the shot was fired at a player caught in a Net Launcher net (within 25 ticks of the net hitting them)
  */
 public record ShotResult(
 		long timestampMillis,
@@ -33,6 +34,7 @@ public record ShotResult(
 		List<String> otherSounds,
 		PvpCategory category,
 		Double speedBeforeBps,
-		Double speedAfterBps
+		Double speedAfterBps,
+		boolean netted
 ) {
 }

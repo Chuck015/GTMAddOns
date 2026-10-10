@@ -147,6 +147,10 @@ public final class ShotTracker {
 
 	/** Why the latest Net Launcher shot was a hit or a miss (null if the last shot wasn't one); read by dev mode. */
 	private String netNote = null;
+	/** A Net Launcher hit on a wingsuit player nets them for 25 ticks: shots fired at them in that time are "netted" (see resolve). */
+	private static final long NETTED_MILLIS = 25 * 50L;
+	private long nettedStartMillis = 0L, nettedUntilMillis = 0L;
+	private String nettedTarget = null;
 
 	public String takeNetNote() {
 		String note = netNote;
@@ -313,6 +317,18 @@ public final class ShotTracker {
 		}
 
 		if (wingsuitOnly) netNote = describeNetShot(shot, hit, damageNotes);
+		// A net hit starts the 25 ticks; other guns' shots in that time at the netted player (or missing, with nobody else hit) are netted.
+		boolean netted = false;
+		if (wingsuitOnly) {
+			if (hit) {
+				nettedStartMillis = shot.wallMillis;
+				nettedUntilMillis = shot.wallMillis + NETTED_MILLIS;
+				nettedTarget = target;
+				com.example.gtmaddons.NetFightEnd.INSTANCE.onNetHit(target, shot.wallMillis);
+			}
+		} else if (shot.wallMillis >= nettedStartMillis && shot.wallMillis <= nettedUntilMillis) {
+			netted = !hit || target == null || nettedTarget == null || target.equalsIgnoreCase(nettedTarget);
+		}
 		gunshotSound = pickGunshotSound(otherSounds);
 		if (gunshotSound != null) otherSounds.remove(gunshotSound);
 
@@ -320,7 +336,7 @@ public final class ShotTracker {
 				hit, headshot && hit, kill && hit, target, distance, gunshotSound,
 				shot.responseNanos != null ? shot.responseNanos / 1_000_000L : null,
 				ping(client), otherSounds, shot.category,
-				shot.speedBeforeBps, shot.speedBeforeBps != null ? shot.peakBps : null);
+				shot.speedBeforeBps, shot.speedBeforeBps != null ? shot.peakBps : null, netted);
 	}
 
 	/** The reason for a Net Launcher shot's verdict, for dev mode (see NetLauncherDebugger). */

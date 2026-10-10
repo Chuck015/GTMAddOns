@@ -6,6 +6,7 @@ import com.example.gtmaddons.HitSounds;
 import com.example.gtmaddons.JetpackParticles;
 import com.example.gtmaddons.ComboTracker;
 import com.example.gtmaddons.LatencyTester;
+import com.example.gtmaddons.NetFightEnd;
 import com.example.gtmaddons.gun.DevLogger;
 import com.example.gtmaddons.gun.ShotTracker;
 import net.minecraft.client.MinecraftClient;
@@ -55,6 +56,7 @@ public abstract class ClientPlayNetworkHandlerMixin {
 		MinecraftClient client = MinecraftClient.getInstance();
 		CombatTracker.INSTANCE.onDamage(packet.entityId(), packet.sourceCauseId());
 		ComboTracker.INSTANCE.onDamage(packet.entityId(), packet.sourceCauseId());
+		NetFightEnd.INSTANCE.onDamage(client.world != null ? client.world.getEntityById(packet.entityId()) : null, packet.sourceCauseId());
 		HitSounds.INSTANCE.onDamage(client.world != null ? client.world.getEntityById(packet.entityId()) : null, packet.sourceCauseId());
 		ShotTracker.INSTANCE.onDamage(client.world != null ? client.world.getEntityById(packet.entityId()) : null,
 				packet.sourceCauseId());

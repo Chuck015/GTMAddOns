@@ -14,7 +14,7 @@ import net.minecraft.util.Formatting;
 /**
  * The dev mode / QA mode menu (Settings > Dev mode, Settings > QA mode), opened
  * once the backend has approved this account. Same options for both: a row of
- * tabs (Wing, JP, General, like the PVP settings) and, for the open
+ * tabs (Wing, JP, General like the PVP settings, then PVE) and, for the open
  * tab, one button per DevFilter to switch that output on or off (each mode
  * keeps its own choices), then All on / All off, and the mode's own on/off
  * button at the bottom. QA mode

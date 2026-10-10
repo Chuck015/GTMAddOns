@@ -3,6 +3,9 @@ package com.example.gtmaddons;
 import com.example.gtmaddons.gun.DevFilter;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.fabricmc.loader.api.FabricLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,6 +45,10 @@ public final class Settings {
 	public boolean boostHeight = false;
 	/** /near's reply as a sorted list, one player per line, in place of GTM's one long line (see NearList). */
 	public boolean betterNear = false;
+	/** Hide the recipes inside the recipe book of the survival inventory; the book itself still opens and closes (RecipeBookHider). */
+	public boolean hideRecipeBook = false;
+	/** Names above items lying on the ground, only for items in plain view (DroppedItemLabels). */
+	public boolean droppedItemNames = false;
 	/** An icon after the name of players who run GTMAddOns (tab list and nametags). */
 	public boolean showModUsers = false;
 
@@ -64,7 +71,7 @@ public final class Settings {
 	public boolean fishHeads = false;
 
 	/** The 25 / 50 / 100 fights choice of the stats screens (FightViews). */
-	public int statsFights = 25;
+	public int statsFights = 500;
 	/** Hit sound: play a sound when you hit a player (see HitSounds). Off by default. */
 	public boolean hitSound = false;
 	/** The sound's vanilla id, its volume (0-1) and pitch (0.5-2). */
@@ -119,6 +126,12 @@ public final class Settings {
 			}
 		} catch (Exception e) {
 			LOGGER.warn("GTMAddOns: couldn't read settings, using defaults: {}", e.toString());
+			// Keep the unreadable file: the next save would otherwise overwrite it with defaults.
+			try {
+				Files.copy(path(), path().resolveSibling("gtmaddons.json.broken"), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+			} catch (Exception ignored) {
+				// nothing more to do
+			}
 		}
 		return new Settings();
 	}
@@ -135,9 +148,29 @@ public final class Settings {
 		save();
 	}
 
+	/**
+	 * Writes the settings, keeping every key in the file that this version doesn't know: a newer version's settings survive an older
+	 * version (or another Minecraft version of the mod sharing the same config) saving. A setting that is null here (so Gson leaves it
+	 * out) is removed from the file, so clearing a choice still sticks.
+	 */
 	public void save() {
 		try {
-			Files.writeString(path(), GSON.toJson(this), StandardCharsets.UTF_8);
+			JsonObject out = new JsonObject();
+			if (Files.exists(path())) {
+				try {
+					JsonElement existing = JsonParser.parseString(Files.readString(path(), StandardCharsets.UTF_8));
+					if (existing.isJsonObject()) out = existing.getAsJsonObject();
+				} catch (Exception e) {
+					// an unreadable file is replaced by what we have
+				}
+			}
+			JsonObject mine = GSON.toJsonTree(this).getAsJsonObject();
+			for (java.lang.reflect.Field field : Settings.class.getDeclaredFields()) {
+				if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+				if (mine.has(field.getName())) out.add(field.getName(), mine.get(field.getName()));
+				else out.remove(field.getName());
+			}
+			Files.writeString(path(), GSON.toJson(out), StandardCharsets.UTF_8);
 		} catch (IOException e) {
 			LOGGER.warn("GTMAddOns: couldn't save settings: {}", e.toString());
 		}

@@ -18,12 +18,12 @@ import net.minecraft.util.Formatting;
  *   hub   Move HUD, then PVP, QOL, Miscellaneous, and PVE (coming soon)
  *   PVP   a row of tabs across the top, one section below at a time:
  *           Wing    cobweb transparency (a slider), boost angle, boost height, swap recording,
- *                   advanced swap info, swap timer (opens SwapTimerScreen)
+ *                   advanced swap info, hide recipes in the recipe book, swap timer (opens SwapTimerScreen)
  *           JP      better combo timers, jetpack sneak animation, hide jetpack particles
  *           General hit sound, combat timer (a HUD line you can move)
- *   QOL   sounds, better near
+ *   QOL   sounds, better near, dropped item names
  *   MISC  latency tester, GTMAddOns icon, fish cat, then dev mode / QA mode side by
- *         side and admin mode under them (with its Player info... button while it is on)
+ *         side and admin mode under them (with its Player info... and Notify players... buttons while it is on)
  */
 public class SettingsScreen extends Screen {
 
@@ -69,7 +69,7 @@ public class SettingsScreen extends Screen {
 
 	private static PvpTab pvpTab = PvpTab.WING;
 	/** Rows in the biggest tab (Wing): every tab reserves this much, so Back stays put when you switch. */
-	private static final int PVP_ROWS = 6;
+	private static final int PVP_ROWS = 7;
 
 	public SettingsScreen(Screen parent, GTMAddOnsClient mod) {
 		this(parent, mod, Page.HUB);
@@ -142,6 +142,7 @@ public class SettingsScreen extends Screen {
 				y = toggle(x, y, "Boost height", mod::isBoostHeightOn, mod::setBoostHeightOn);
 				y = toggle(x, y, "Swap recording", mod::isSwapRecordButtonOn, mod::setSwapRecordButtonOn);
 				y = toggle(x, y, "Advanced swap info", mod::isSwapDebugOn, mod::setSwapDebugOn);
+				y = toggle(x, y, "Hide recipes in book", mod::isHideRecipeBookOn, mod::setHideRecipeBookOn);
 				addDrawableChild(ButtonWidget.builder(Text.literal("Swap timer..."), b -> client.setScreen(new SwapTimerScreen(this, mod)))
 						.dimensions(x, y, BUTTON_WIDTH, 20).build());
 			}
@@ -164,6 +165,7 @@ public class SettingsScreen extends Screen {
 				.dimensions(x, y, BUTTON_WIDTH, 20).build());
 		y += ROW;
 		y = toggle(x, y, "Better near", mod::isBetterNearOn, mod::setBetterNearOn);
+		y = toggle(x, y, "Dropped item names", mod::isDroppedItemNamesOn, mod::setDroppedItemNamesOn);
 		return y;
 	}
 
@@ -189,6 +191,9 @@ public class SettingsScreen extends Screen {
 			y += ROW;
 			addDrawableChild(ButtonWidget.builder(Text.literal("Player info..."), b -> client.setScreen(new AdminPlayerInfoScreen(this, mod)))
 					.dimensions(x, y, BUTTON_WIDTH, 20).build());
+			y += ROW;
+			addDrawableChild(ButtonWidget.builder(Text.literal("Notify players..."), b -> client.setScreen(new AdminNoticeScreen(this, mod)))
+					.dimensions(x, y, BUTTON_WIDTH, 20).build());
 		}
 		return y + ROW - GAP;
 	}
@@ -207,8 +212,8 @@ public class SettingsScreen extends Screen {
 		int rows = switch (page) {
 			case HUB -> ROW + GAP + 4 * ROW;
 			case PVP -> ROW + GAP / 2 + PVP_ROWS * ROW;
-			case QOL -> 2 * ROW;
-			case MISC -> 3 * ROW + GAP + 2 * ROW - GAP + (mod.isAdminModeOn() ? ROW : 0);
+			case QOL -> 3 * ROW;
+			case MISC -> 3 * ROW + GAP + 2 * ROW - GAP + (mod.isAdminModeOn() ? 2 * ROW : 0);
 		};
 		return rows + GAP + 20;
 	}
