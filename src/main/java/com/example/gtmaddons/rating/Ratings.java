@@ -294,14 +294,14 @@ public final class Ratings {
 		if (detail.deathMs() != null && detail.deaths() > 0) {
 			survival = shrink(RatingWeights.survivalScore(detail.deathMs() / 1000.0), detail.deaths(), RatingWeights.FULL_DEATHS);
 		}
-		List<Part> performanceParts = List.of(new Part("Mechanics", skill, RatingWeights.Performance.MECHANICS),
+		List<Part> performanceParts = List.of(new Part("Skill", skill, RatingWeights.Performance.MECHANICS),
 				new Part("K/D", kd, RatingWeights.Performance.KD), new Part("Kills per fight", killsPerFight, RatingWeights.Performance.KILLS_PER_FIGHT),
 				new Part("Survival time", survival, RatingWeights.Performance.SURVIVAL));
 		Double performance = skill != null ? weighted(performanceParts) : null;
-		breakdown.add("Mechanics rating (no results) - part: score (weight)");
+		breakdown.add("Skill rating (no results) - part: score (weight)");
 		for (Part p : skillParts) breakdown.add(String.format("  %s: %s (%.2f)", p.name().toLowerCase(java.util.Locale.ROOT), p.score() != null ? String.format("%.0f", p.score()) : "-", p.weight()));
 		breakdown.add(skill != null ? String.format("  mechanics: %.0f", skill) : "  mechanics needs " + needs);
-		breakdown.add("Results rating - part: score (weight)");
+		breakdown.add("Performance rating - part: score (weight)");
 		for (Part p : performanceParts) breakdown.add(String.format("  %s: %s (%.2f)", p.name().toLowerCase(java.util.Locale.ROOT), p.score() != null ? String.format("%.0f", p.score()) : "-", p.weight()));
 		if (detail.fights() > 0) breakdown.add(String.format("    kills per fight: %d of %d fights (%.0f%%)", detail.kills(), detail.fights(), 100.0 * detail.kills() / detail.fights()));
 		if (Math.abs(wonKills - detail.kills()) > 1e-9) {

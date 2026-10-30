@@ -1,7 +1,7 @@
 package com.example.gtmaddons;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.player.PlayerEntity;
+import com.example.gtmaddons.compat.Mc;
+import net.minecraft.client.Minecraft;
 
 /**
  * Collects how you move with the keys, to learn what good movement looks like (nothing uses it for a rating yet):
@@ -123,11 +123,11 @@ public final class MovementInputTracker {
 
 	// ---- Every frame ----
 
-	public void onFrame(MinecraftClient client) {
+	public void onFrame(Minecraft client) {
 		long now = System.nanoTime();
 		long dtNanos = Math.min(now - lastNanos, MAX_FRAME_NANOS);
 		lastNanos = now;
-		net.minecraft.client.network.ClientPlayerEntity player = client.player;
+		net.minecraft.client.player.LocalPlayer player = client.player;
 		if (player == null) {
 			hasLast = false;
 			return;
@@ -137,18 +137,18 @@ public final class MovementInputTracker {
 		lastX = x;
 		lastZ = z;
 		hasLast = true;
-		boolean jump = client.options.jumpKey.isPressed();
+		boolean jump = client.options.keyJump.isDown();
 		boolean jumped = jump && !lastJump;
 		lastJump = jump;
 		if (fight == null && swap == null) return;
 		// Inventory, chat and menus: not moving with the keys, so not counted.
-		if (client.currentScreen != null || dtNanos <= 0) return;
+		if (Mc.screen(client) != null || dtNanos <= 0) return;
 		double dt = dtNanos / 1_000_000.0;
 		double bps = step > 5.0 ? 0.0 : step / (dtNanos / 1e9);
 		if (step > 5.0) step = 0.0;
-		boolean fw = client.options.forwardKey.isPressed(), bk = client.options.backKey.isPressed(), lf = client.options.leftKey.isPressed(), rt = client.options.rightKey.isPressed();
-		boolean sneak = client.options.sneakKey.isPressed(), sprint = client.options.sprintKey.isPressed();
-		boolean ground = player.isOnGround();
+		boolean fw = client.options.keyUp.isDown(), bk = client.options.keyDown.isDown(), lf = client.options.keyLeft.isDown(), rt = client.options.keyRight.isDown();
+		boolean sneak = client.options.keyShift.isDown(), sprint = client.options.keySprint.isDown();
+		boolean ground = player.onGround();
 		if (fight != null) fight.add(dt, fw, bk, lf, rt, jumped, sneak, sprint, ground, step, bps);
 		if (swap != null) swap.add(dt, fw, bk, lf, rt, jumped, sneak, sprint, ground, step, bps);
 	}

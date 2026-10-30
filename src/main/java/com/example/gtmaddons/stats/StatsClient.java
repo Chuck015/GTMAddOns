@@ -1,18 +1,18 @@
 package com.example.gtmaddons.stats;
 
-import com.example.gtmaddons.update.Updater;
 import com.example.gtmaddons.ComboTracker;
 import com.example.gtmaddons.FightTracker;
 import com.example.gtmaddons.PvpCategory;
 import com.example.gtmaddons.gun.ShotResult;
+import com.example.gtmaddons.update.Updater;
 import com.google.gson.FieldNamingPolicy;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.session.Session;
-import net.minecraft.network.encryption.PlayerKeyPair;
-import net.minecraft.network.encryption.PlayerPublicKey;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.User;
+import net.minecraft.world.entity.player.ProfileKeyPair;
+import net.minecraft.world.entity.player.ProfilePublicKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -367,6 +367,7 @@ public final class StatsClient {
 		if (fight.opponentTrack() != null) body.addProperty("opponent_track", fight.opponentTrack());
 		if (fight.netEnded()) body.addProperty("net_ended", true);
 		if (fight.movementInput() != null) body.add("movement_input", fight.movementInput().toJson());
+		if (fight.mouseInput() != null) body.add("mouse_input", fight.mouseInput().toJson());
 		body.add("swaps", GSON.toJsonTree(fight.swaps()));
 		body.add("guns", GSON.toJsonTree(List.copyOf(guns.values())));
 		body.add("combos", GSON.toJsonTree(List.copyOf(combos.values())));
@@ -571,21 +572,21 @@ public final class StatsClient {
 	}
 
 	private static UUID currentAccount() {
-		return MinecraftClient.getInstance().getSession().getUuidOrNull();
+		return Minecraft.getInstance().getUser().getProfileId();
 	}
 
 	private String login(UUID uuid) throws Exception {
-		MinecraftClient client = MinecraftClient.getInstance();
-		Session session = client.getSession();
-		if (!uuid.equals(session.getUuidOrNull())) throw new IOException("account changed while logging in");
+		Minecraft client = Minecraft.getInstance();
+		User session = client.getUser();
+		if (!uuid.equals(session.getProfileId())) throw new IOException("account changed while logging in");
 
 		// The game's own key if it has one; else the one Mojang issues for the account (see mojangKey).
 		LoginKey key = null;
 		try {
-			java.util.Optional<PlayerKeyPair> own = client.getProfileKeys().fetchKeyPair().get(15, TimeUnit.SECONDS);
+			java.util.Optional<ProfileKeyPair> own = client.getProfileKeyPairManager().prepareKeyPair().get(15, TimeUnit.SECONDS);
 			if (own.isPresent()) {
-				PlayerKeyPair keyPair = own.get();
-				PlayerPublicKey.PublicKeyData keyData = keyPair.publicKey().data();
+				ProfileKeyPair keyPair = own.get();
+				ProfilePublicKey.Data keyData = keyPair.publicKey().data();
 				key = new LoginKey(keyPair.privateKey(), keyData.key().getEncoded(), keyData.expiresAt().toEpochMilli(), keyData.keySignature());
 			}
 		} catch (Exception e) {
@@ -604,7 +605,7 @@ public final class StatsClient {
 
 		Base64.Encoder base64 = Base64.getEncoder();
 		JsonObject body = new JsonObject();
-		body.addProperty("username", session.getUsername());
+		body.addProperty("username", session.getName());
 		body.addProperty("uuid", undashedUuid);
 		body.addProperty("server_id", serverId);
 		body.addProperty("public_key", base64.encodeToString(key.publicKey()));
@@ -638,7 +639,7 @@ public final class StatsClient {
 	 * The profile key Mojang issues for this account (POST api.minecraftservices.com/player/certificates with the account's own
 	 * access token, which goes only to Mojang). Used when the game has none loaded. Throws with advice if Mojang won't give one.
 	 */
-	private LoginKey mojangKey(Session session, UUID account) throws Exception {
+	private LoginKey mojangKey(User session, UUID account) throws Exception {
 		if (mojangKeyCache != null && account.equals(mojangKeyAccount) && mojangKeyCache.expiresAtMs() > System.currentTimeMillis() + 3_600_000L) {
 			return mojangKeyCache;
 		}
@@ -676,34 +677,6 @@ public final class StatsClient {
 	/** The bytes inside a PEM block (the key's DER encoding): header and footer lines and line breaks removed. */
 	static byte[] pemBytes(String pem) {
 		return Base64.getMimeDecoder().decode(pem.replaceAll("-----(BEGIN|END)[A-Z ]*-----", "").replaceAll("\\s", ""));
-	}
-
-	/**
-	 * The game had no profile key for this account. Ask Mojang's certificate service the same question the game does
-	 * and say what its answer means, so the player knows what to fix. Short on purpose: it is shown in one line on the
-	 * stats screens (the same text is written to the game log).
-	 */
-	private String explainMissingKey(Session session) {
-		String advice;
-		try {
-			String accessToken = session.getAccessToken();
-			if (accessToken == null || accessToken.length() < 20) {
-				advice = "This looks like an offline account - the stats need a real Microsoft Minecraft account";
-			} else {
-				HttpResponse<String> response = http.send(HttpRequest.newBuilder(URI.create("https://api.minecraftservices.com/player/certificates"))
-						.timeout(Duration.ofSeconds(10))
-						.header("Authorization", "Bearer " + accessToken)
-						.POST(HttpRequest.BodyPublishers.noBody())
-						.build(), HttpResponse.BodyHandlers.ofString());
-				advice = explainStatus(response.statusCode());
-				LOGGER.warn("GTMAddOns: no profile key; Mojang's certificate service answered HTTP {}", response.statusCode());
-			}
-		} catch (java.io.IOException | InterruptedException e) {
-			if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-			advice = "Can't reach Mojang's key service - a VPN, firewall or antivirus may be blocking it";
-			LOGGER.warn("GTMAddOns: no profile key; couldn't reach Mojang's certificate service: {}", e.toString());
-		}
-		return advice;
 	}
 
 	/** What gets signed to log in. Must match loginMessage in the backend. */

@@ -1,16 +1,16 @@
 package com.example.gtmaddons.gun;
 
 import com.example.gtmaddons.PvpCategory;
-import net.minecraft.block.Blocks;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -41,18 +41,18 @@ final class NetLauncherDebugger {
 	private final DevLogger log;
 
 	/** Where the crosshair ray hit a block when the latest Net Launcher shot was fired (null if it hit nothing). */
-	private Vec3d aimImpact = null;
+	private Vec3 aimImpact = null;
 
 	private static final class Followup {
 		final long startNanos = System.nanoTime();
 		final int targetId;
 		final String targetName;
-		final Vec3d impact;
-		Vec3d lastPos;
+		final Vec3 impact;
+		Vec3 lastPos;
 		long lastNanos = startNanos;
 		int next = 0;
 
-		Followup(int targetId, String targetName, Vec3d impact, Vec3d startPos) {
+		Followup(int targetId, String targetName, Vec3 impact, Vec3 startPos) {
 			this.targetId = targetId;
 			this.targetName = targetName;
 			this.impact = impact;
@@ -72,18 +72,18 @@ final class NetLauncherDebugger {
 	}
 
 	/** The moment a Net Launcher shot is fired: remember where the crosshair pointed. */
-	void onShot(MinecraftClient client) {
-		ClientPlayerEntity player = client.player;
-		if (player == null || client.world == null) return;
-		Vec3d eye = player.getEyePos();
-		Vec3d end = eye.add(player.getRotationVec(1.0f).multiply(AIM_RANGE));
-		BlockHitResult block = client.world.raycast(new RaycastContext(
-				eye, end, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
-		aimImpact = block.getType() == HitResult.Type.MISS ? null : block.getPos();
+	void onShot(Minecraft client) {
+		LocalPlayer player = client.player;
+		if (player == null || client.level == null) return;
+		Vec3 eye = player.getEyePosition();
+		Vec3 end = eye.add(player.getViewVector(1.0f).scale(AIM_RANGE));
+		BlockHitResult block = client.level.clip(new ClipContext(
+				eye, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+		aimImpact = block.getType() == HitResult.Type.MISS ? null : block.getLocation();
 	}
 
 	/** ShotTracker's verdict for a Net Launcher shot, with its reason. */
-	void onResult(MinecraftClient client, ShotResult r, String reason) {
+	void onResult(Minecraft client, ShotResult r, String reason) {
 		log.openWindow(client);
 		String verdict = r.hit() ? "HIT " + r.target() : "MISS";
 		String sounds = "gunshot sound=" + (r.gunshotSound() != null ? r.gunshotSound() : "none")
@@ -91,24 +91,24 @@ final class NetLauncherDebugger {
 		log.add(String.format("NET LAUNCHER  %s%s | %s | ammo %d -> %d, ping %dms, %s | %s",
 				verdict, r.hit() && !Double.isNaN(r.distance()) ? String.format(" at %.1f blocks", r.distance()) : "",
 				reason, r.ammoBefore(), r.ammoAfter(), r.pingMs(), sounds, r.category().label));
-		DevLogger.chat("Net Launcher: " + verdict + " - " + reason, r.hit() ? Formatting.GREEN : Formatting.RED);
+		DevLogger.chat("Net Launcher: " + verdict + " - " + reason, r.hit() ? ChatFormatting.GREEN : ChatFormatting.RED);
 
 		// Follow up on whoever the net was meant for: the player it hit, or else the fireball's landing.
-		PlayerEntity target = null;
-		if (r.target() != null && client.world != null) {
-			for (PlayerEntity player : client.world.getPlayers()) {
+		Player target = null;
+		if (r.target() != null && client.level != null) {
+			for (Player player : client.level.players()) {
 				if (player.getName().getString().equals(r.target())) target = player;
 			}
 		}
 		if (target == null && aimImpact == null) return;
 		followups.add(new Followup(target != null ? target.getId() : -1, target != null ? r.target() : null,
-				aimImpact, target != null ? target.getEntityPos() : aimImpact));
+				aimImpact, target != null ? target.position() : aimImpact));
 	}
 
 	/** Every frame: take the follow-up samples that are due. */
-	void onFrame(MinecraftClient client) {
+	void onFrame(Minecraft client) {
 		if (followups.isEmpty()) return;
-		if (client.world == null) {
+		if (client.level == null) {
 			followups.clear();
 			return;
 		}
@@ -123,23 +123,23 @@ final class NetLauncherDebugger {
 		}
 	}
 
-	private void sample(MinecraftClient client, Followup f, long millis, long now) {
+	private void sample(Minecraft client, Followup f, long millis, long now) {
 		log.openWindow(client);
-		PlayerEntity target = f.targetId >= 0 && client.world.getEntityById(f.targetId) instanceof PlayerEntity p ? p : null;
+		Player target = f.targetId >= 0 && client.level.getEntity(f.targetId) instanceof Player p ? p : null;
 		if (f.targetId >= 0) {
 			if (target == null) {
 				log.add(String.format("NET FOLLOW-UP +%dms  %s: no longer in view (died, left, or out of range)", millis, f.targetName));
 				f.next = SAMPLE_NANOS.length;
 				return;
 			}
-			Vec3d pos = target.getEntityPos();
+			Vec3 pos = target.position();
 			double seconds = Math.max(0.001, (now - f.lastNanos) / 1e9);
 			double speed = pos.subtract(f.lastPos).length() / seconds;
 			f.lastPos = pos;
 			f.lastNanos = now;
 			log.add(String.format("NET FOLLOW-UP +%dms  %s: %s, gliding %s, chest wingsuit %s, moved at %.1f b/s since the last sample, health %.1f, cobwebs within %d blocks: %d",
-					millis, f.targetName, target.isOnGround() ? "on ground" : "airborne", target.isGliding(),
-					PvpCategory.isWingsuit(target.getEquippedStack(net.minecraft.entity.EquipmentSlot.CHEST)), speed,
+					millis, f.targetName, target.onGround() ? "on ground" : "airborne", target.isFallFlying(),
+					PvpCategory.isWingsuit(target.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.CHEST)), speed,
 					target.getHealth() + target.getAbsorptionAmount(), WEB_RADIUS, cobwebsAround(client, pos)));
 		} else if (f.impact != null) {
 			log.add(String.format("NET FOLLOW-UP +%dms  aim point (%.0f, %.0f, %.0f) where the crosshair ray hit a block when you fired: cobwebs within %d blocks: %d",
@@ -147,13 +147,13 @@ final class NetLauncherDebugger {
 		}
 	}
 
-	private static int cobwebsAround(MinecraftClient client, Vec3d center) {
-		BlockPos base = BlockPos.ofFloored(center);
+	private static int cobwebsAround(Minecraft client, Vec3 center) {
+		BlockPos base = BlockPos.containing(center);
 		int count = 0;
 		for (int dx = -WEB_RADIUS; dx <= WEB_RADIUS; dx++) {
 			for (int dy = -WEB_RADIUS; dy <= WEB_RADIUS; dy++) {
 				for (int dz = -WEB_RADIUS; dz <= WEB_RADIUS; dz++) {
-					if (client.world.getBlockState(base.add(dx, dy, dz)).isOf(Blocks.COBWEB)) count++;
+					if (client.level.getBlockState(base.offset(dx, dy, dz)).is(Blocks.COBWEB)) count++;
 				}
 			}
 		}

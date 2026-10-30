@@ -1,15 +1,17 @@
 package com.example.gtmaddons.gui;
 
 import com.example.gtmaddons.GTMAddOnsClient;
+import com.example.gtmaddons.compat.Gfx;
+import com.example.gtmaddons.compat.Mc;
+import com.example.gtmaddons.compat.ModScreen;
 import com.example.gtmaddons.gun.DevFilter;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.ConfirmScreen;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.tooltip.Tooltip;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.screen.ScreenTexts;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 
 /**
  * The dev mode / QA mode menu (Settings > Dev mode, Settings > QA mode), opened
@@ -22,7 +24,7 @@ import net.minecraft.util.Formatting;
  *
  * Choices apply at once, even while the mode is on.
  */
-public class DevModeScreen extends Screen {
+public class DevModeScreen extends ModScreen {
 
 	private static final int ROW = 22;
 	private static final int GAP = 4;
@@ -34,7 +36,7 @@ public class DevModeScreen extends Screen {
 	private String status = null;
 
 	public DevModeScreen(Screen parent, GTMAddOnsClient mod, boolean qa) {
-		super(Text.literal("GTMAddOns - " + (qa ? "QA mode" : "Dev mode")));
+		super(Component.literal("GTMAddOns - " + (qa ? "QA mode" : "Dev mode")));
 		this.parent = parent;
 		this.mod = mod;
 		this.qa = qa;
@@ -89,12 +91,12 @@ public class DevModeScreen extends Screen {
 		int chip = 62;
 		int tx = width / 2 - (DevFilter.Group.values().length * (chip + GAP) - GAP) / 2;
 		for (DevFilter.Group group : DevFilter.Group.values()) {
-			ButtonWidget button = ButtonWidget.builder(Text.literal(group.label), b -> {
+			Button button = ThemedButton.create(Component.literal(group.label), b -> {
 				tab = group;
-				clearAndInit();
-			}).dimensions(tx, top, chip, 20).build();
+				rebuildWidgets();
+			}).bounds(tx, top, chip, 20).build();
 			button.active = group != tab;
-			addDrawableChild(button);
+			addRenderableWidget(button);
 			tx += chip + GAP;
 		}
 		int gridTop = top + ROW + 6;
@@ -105,42 +107,42 @@ public class DevModeScreen extends Screen {
 			int x = left + (i % cols) * (colWidth + GAP);
 			int y = gridTop + (i / cols) * ROW;
 			i++;
-			addDrawableChild(ButtonWidget.builder(filterText(filter), b -> {
+			addRenderableWidget(ThemedButton.create(filterText(filter), b -> {
 				mod.setDevFilterOn(qa, filter, !mod.isDevFilterOn(qa, filter));
 				b.setMessage(filterText(filter));
-			}).dimensions(x, y, colWidth, 20).tooltip(Tooltip.of(Text.literal(filter.description))).build());
+			}).bounds(x, y, colWidth, 20).tooltip(Tooltip.create(Component.literal(filter.description))).build());
 		}
 
 		int y = gridTop + rows() * ROW + 8;
 		int half = (BUTTON_WIDTH - GAP) / 2;
 		int x = width / 2 - BUTTON_WIDTH / 2;
-		addDrawableChild(ButtonWidget.builder(Text.literal("All on"), b -> setAll(true))
-				.dimensions(x, y, half, 20).build());
-		addDrawableChild(ButtonWidget.builder(Text.literal("All off"), b -> setAll(false))
-				.dimensions(x + BUTTON_WIDTH - half, y, half, 20).build());
+		addRenderableWidget(ThemedButton.create(Component.literal("All on"), b -> setAll(true))
+				.bounds(x, y, half, 20).build());
+		addRenderableWidget(ThemedButton.create(Component.literal("All off"), b -> setAll(false))
+				.bounds(x + BUTTON_WIDTH - half, y, half, 20).build());
 
 		y += ROW + 8;
-		addDrawableChild(ButtonWidget.builder(Text.literal(modeName() + ": ").append(onOff(modeOn())), b -> toggleMode())
-				.dimensions(x, y, BUTTON_WIDTH, 20)
-				.tooltip(Tooltip.of(Text.literal(qa
+		addRenderableWidget(ThemedButton.create(Component.literal(modeName() + ": ").append(onOff(modeOn())), b -> toggleMode())
+				.bounds(x, y, BUTTON_WIDTH, 20)
+				.tooltip(Tooltip.create(Component.literal(qa
 						? "Show the selected things in chat. Nothing is saved to disk."
 						: "Show the selected things in chat and save them to gtmaddons-dev.log")))
 				.build());
-		addDrawableChild(ButtonWidget.builder(ScreenTexts.BACK, b -> close())
-				.dimensions(x, y + ROW, BUTTON_WIDTH, 20).build());
+		addRenderableWidget(ThemedButton.create(CommonComponents.GUI_BACK, b -> onClose())
+				.bounds(x, y + ROW, BUTTON_WIDTH, 20).build());
 	}
 
-	private Text filterText(DevFilter filter) {
-		return Text.literal(filter.label + ": ").append(onOff(mod.isDevFilterOn(qa, filter)));
+	private Component filterText(DevFilter filter) {
+		return Component.literal(filter.label + ": ").append(onOff(mod.isDevFilterOn(qa, filter)));
 	}
 
-	private static Text onOff(boolean on) {
-		return Text.literal(on ? "ON" : "OFF").formatted(on ? Formatting.GREEN : Formatting.RED);
+	private static Component onOff(boolean on) {
+		return Component.literal(on ? "ON" : "OFF").withStyle(on ? ChatFormatting.GREEN : ChatFormatting.RED);
 	}
 
 	private void setAll(boolean on) {
 		for (DevFilter filter : DevFilter.values()) mod.setDevFilterOn(qa, filter, on);
-		clearAndInit();
+		rebuildWidgets();
 	}
 
 	/** Turning it off is immediate; turning it on asks for confirmation first. */
@@ -148,40 +150,41 @@ public class DevModeScreen extends Screen {
 		if (modeOn()) {
 			if (qa) mod.disableQaMode(message -> status = message);
 			else mod.disableDevMode(message -> status = message);
-			clearAndInit();
+			rebuildWidgets();
 			return;
 		}
-		client.setScreen(new ConfirmScreen(yes -> {
+		Mc.setScreen(minecraft, new ConfirmScreen(yes -> {
 			if (yes) {
 				if (qa) mod.enableQaMode(message -> status = message);
 				else mod.enableDevMode(message -> status = message);
 			}
-			client.setScreen(this);
+			Mc.setScreen(minecraft, this);
 		},
-				Text.literal("Enable " + modeName() + "?"),
-				Text.literal("Please ensure you're on one of the dev servers when enabling this mode.\n\n"
+				Component.literal("Enable " + modeName() + "?"),
+				Component.literal("Please ensure you're on one of the dev servers when enabling this mode.\n\n"
 						+ (qa ? "QA mode shows the same things as dev mode without saving a log.\n\n" : "")
 						+ "Do you want to enable it?")));
 	}
 
 	@Override
-	public void close() {
-		client.setScreen(parent);
+	public void onClose() {
+		Mc.setScreen(minecraft, parent);
 	}
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
-		super.render(context, mouseX, mouseY, deltaTicks);
+	public void draw(Gfx context, int mouseX, int mouseY, float deltaTicks) {
+		context.fill(0, 0, width, height, Ui.PAGE);
+		super.draw(context, mouseX, mouseY, deltaTicks);
 		int top = top();
-		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, top - 26, Ui.TEXT);
-		context.drawCenteredTextWithShadow(textRenderer,
-				Text.literal("Choose what to show, then turn " + modeName() + " on. Hover an option to see what it does."),
+		context.centeredText(font, title, width / 2, top - 26, Ui.TEXT);
+		context.centeredText(font,
+				Component.literal("Choose what to show, then turn " + modeName() + " on. Hover an option to see what it does."),
 				width / 2, top - 14, Ui.MUTED);
 		if (filtersIn(tab) == 0) {
-			context.drawCenteredTextWithShadow(textRenderer, Text.literal("Nothing here yet"), width / 2, top + ROW + 10, 0xFF888888);
+			context.centeredText(font, Component.literal("Nothing here yet"), width / 2, top + ROW + 10, 0xFF888888);
 		}
 		if (status != null) {
-			context.drawCenteredTextWithShadow(textRenderer, Text.literal(status), width / 2, top + contentHeight() + 2, 0xFFFFFF55);
+			context.centeredText(font, Component.literal(status), width / 2, top + contentHeight() + 2, 0xFFFFFF55);
 		}
 	}
 }

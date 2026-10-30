@@ -1,9 +1,9 @@
 package com.example.gtmaddons;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.Component;
 
 /**
  * Settings > Boost height: while gliding, shows whether you're low enough
@@ -21,9 +21,9 @@ public final class BoostHeightHud {
 	private BoostHeightHud() {}
 
 	/** The line to show (drawn where HudLayout puts it), or null when not gliding. */
-	public static Text text(MinecraftClient client) {
-		ClientPlayerEntity player = client.player;
-		if (player == null || !player.isGliding()) return null;
+	public static Component text(Minecraft client) {
+		LocalPlayer player = client.player;
+		if (player == null || !player.isFallFlying()) return null;
 
 		double height = player.getY();
 		boolean canBoost = height < BOOST_MAX_Y;
@@ -31,6 +31,6 @@ public final class BoostHeightHud {
 		String label = String.format("%s · Y %d (limit %d)", canBoost ? "✔ Low enough to boost" : "✘ Too high to boost",
 				(int) Math.floor(height), (int) BOOST_MAX_Y);
 
-		return Text.literal(label).formatted(canBoost ? Formatting.GREEN : Formatting.RED);
+		return Component.literal(label).withStyle(canBoost ? ChatFormatting.GREEN : ChatFormatting.RED);
 	}
 }

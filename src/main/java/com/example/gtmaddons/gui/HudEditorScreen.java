@@ -1,13 +1,14 @@
 package com.example.gtmaddons.gui;
 
-import com.example.gtmaddons.HudLayout;
 import com.example.gtmaddons.HudLayout.Element;
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.screen.ScreenTexts;
-import net.minecraft.text.Text;
+import com.example.gtmaddons.HudLayout;
+import com.example.gtmaddons.compat.Gfx;
+import com.example.gtmaddons.compat.Mc;
+import com.example.gtmaddons.compat.ModScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 
 import java.util.function.Predicate;
 
@@ -22,7 +23,7 @@ import java.util.function.Predicate;
  * the crosshair and hotbar. Elements that are turned off in Settings are
  * shown dimmed, and can still be moved.
  */
-public class HudEditorScreen extends Screen {
+public class HudEditorScreen extends ModScreen {
 
 	private static final int SNAP = 4;
 	private static final int BOX_PAD = 2;
@@ -40,28 +41,28 @@ public class HudEditorScreen extends Screen {
 
 	/** enabled says whether each element's setting is on (off ones are dimmed). */
 	public HudEditorScreen(Screen parent, Predicate<Element> enabled) {
-		super(Text.literal("Move HUD"));
+		super(Component.literal("Move HUD"));
 		this.parent = parent;
 		this.enabled = enabled;
 	}
 
 	@Override
 	protected void init() {
-		addDrawableChild(ButtonWidget.builder(Text.literal("Reset all"), b -> HudLayout.reset())
-				.dimensions(width / 2 - 104, height - 28, 100, 20).build());
-		addDrawableChild(ButtonWidget.builder(ScreenTexts.DONE, b -> close())
-				.dimensions(width / 2 + 4, height - 28, 100, 20).build());
+		addRenderableWidget(ThemedButton.create(Component.literal("Reset all"), b -> HudLayout.reset())
+				.bounds(width / 2 - 104, height - 28, 100, 20).build());
+		addRenderableWidget(ThemedButton.create(CommonComponents.GUI_DONE, b -> onClose())
+				.bounds(width / 2 + 4, height - 28, 100, 20).build());
 	}
 
 	@Override
-	public void close() {
+	public void onClose() {
 		HudLayout.save();
-		client.setScreen(parent);
+		Mc.setScreen(minecraft, parent);
 	}
 
 	/** No blur: the game should be visible to place things around it. */
 	@Override
-	public void renderBackground(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
+	public void drawBackground(Gfx context, int mouseX, int mouseY, float deltaTicks) {
 		context.fill(0, 0, width, height, 0x30000000);
 	}
 
@@ -70,7 +71,7 @@ public class HudEditorScreen extends Screen {
 	/** {left, top, right, bottom} of an element's box on this screen. */
 	private int[] box(Element element) {
 		int[] anchor = HudLayout.anchor(element, width, height);
-		int textWidth = textRenderer.getWidth(element.sample);
+		int textWidth = font.width(element.sample);
 		int left = HudLayout.left(element, anchor[0], textWidth, width);
 		int top = HudLayout.top(anchor[1], height);
 		return new int[] { left - BOX_PAD, top - BOX_PAD, left + textWidth + BOX_PAD, top + 9 + BOX_PAD };
@@ -87,7 +88,7 @@ public class HudEditorScreen extends Screen {
 	}
 
 	@Override
-	public boolean mouseClicked(Click click, boolean doubled) {
+	public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
 		if (super.mouseClicked(click, doubled)) return true;
 		Element element = elementAt(click.x(), click.y());
 		if (element == null) return false;
@@ -104,7 +105,7 @@ public class HudEditorScreen extends Screen {
 	}
 
 	@Override
-	public boolean mouseDragged(Click click, double deltaX, double deltaY) {
+	public boolean mouseDragged(MouseButtonEvent click, double deltaX, double deltaY) {
 		if (dragging == null) return super.mouseDragged(click, deltaX, deltaY);
 		int x = (int) click.x() - grabX;
 		int y = (int) click.y() - grabY;
@@ -116,7 +117,7 @@ public class HudEditorScreen extends Screen {
 	}
 
 	@Override
-	public boolean mouseReleased(Click click) {
+	public boolean mouseReleased(MouseButtonEvent click) {
 		if (dragging != null) {
 			dragging = null;
 			snapped = false;
@@ -127,8 +128,8 @@ public class HudEditorScreen extends Screen {
 	}
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
-		super.render(context, mouseX, mouseY, deltaTicks);
+	public void draw(Gfx context, int mouseX, int mouseY, float deltaTicks) {
+		super.draw(context, mouseX, mouseY, deltaTicks);
 		if (snapped) context.fill(width / 2, 0, width / 2 + 1, height, GUIDE);
 
 		Element hovered = dragging != null ? dragging : elementAt(mouseX, mouseY);
@@ -141,7 +142,7 @@ public class HudEditorScreen extends Screen {
 			context.fill(b[0], b[3] - 1, b[2], b[3], border);
 			context.fill(b[0], b[1], b[0] + 1, b[3], border);
 			context.fill(b[2] - 1, b[1], b[2], b[3], border);
-			context.drawTextWithShadow(textRenderer, element.sample, b[0] + BOX_PAD, b[1] + BOX_PAD, on ? 0xFFFFFFFF : 0x80FFFFFF);
+			context.text(font, element.sample, b[0] + BOX_PAD, b[1] + BOX_PAD, on ? 0xFFFFFFFF : 0x80FFFFFF);
 		}
 
 		// Name of the hovered element, above its box (or below if there's no room).
@@ -149,10 +150,10 @@ public class HudEditorScreen extends Screen {
 			int[] b = box(hovered);
 			String name = hovered.label + (enabled.test(hovered) ? "" : " (off in Settings)");
 			int y = b[1] >= 12 ? b[1] - 11 : b[3] + 2;
-			int x = Math.max(2, Math.min(width - textRenderer.getWidth(name) - 2, b[0]));
-			context.drawTextWithShadow(textRenderer, name, x, y, 0xFFFFFF55);
+			int x = Math.max(2, Math.min(width - font.width(name) - 2, b[0]));
+			context.text(font, name, x, y, 0xFFFFFF55);
 		}
 
-		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 8, 0xFFFFFFFF);
+		context.centeredText(font, title, width / 2, 8, 0xFFFFFFFF);
 	}
 }

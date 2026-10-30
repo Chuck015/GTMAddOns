@@ -1,27 +1,27 @@
 package com.example.gtmaddons.gun;
 
 import com.example.gtmaddons.mixin.LivingEntityInvoker;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.component.ComponentType;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.AttackRangeComponent;
-import net.minecraft.component.type.SwingAnimationComponent;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.Hand;
-import net.minecraft.util.SwingAnimationType;
-import net.minecraft.util.hit.EntityHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.MathHelper;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.component.DataComponentType;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.util.Mth;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.SwingAnimationType;
+import net.minecraft.world.item.component.AttackRange;
+import net.minecraft.world.item.component.SwingAnimation;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -87,7 +87,7 @@ final class SwingDebugger {
 
 		/**
 		 * What the server did with the attack, from Minecraft's own attack code
-		 * (PlayerEntity.attack): strong/weak/crit/sweep only play when damage is
+		 * (Player.attack): strong/weak/crit/sweep only play when damage is
 		 * dealt; nodamage when it got the attack but dealt none; knockback plays
 		 * before the damage check, so on its own it's unclear. No sound means
 		 * the server never ran the attack (not sent, or rejected before it -
@@ -125,22 +125,22 @@ final class SwingDebugger {
 		this.log = log;
 	}
 
-	void beforeAttack(MinecraftClient client, int attackCooldown) {
-		ClientPlayerEntity player = client.player;
+	void beforeAttack(Minecraft client, int attackCooldown) {
+		LocalPlayer player = client.player;
 		if (player == null) return;
-		swingingBefore = player.handSwinging;
-		swingTickBefore = player.handSwingTicks;
+		swingingBefore = player.swinging;
+		swingTickBefore = player.swingTime;
 		attackCooldownBefore = attackCooldown;
 	}
 
-	void afterAttack(MinecraftClient client) {
-		ClientPlayerEntity player = client.player;
+	void afterAttack(Minecraft client) {
+		LocalPlayer player = client.player;
 		if (player == null) return;
 		long now = System.nanoTime();
-		ItemStack stack = player.getStackInHand(Hand.MAIN_HAND);
+		ItemStack stack = player.getItemInHand(InteractionHand.MAIN_HAND);
 		int duration = ((LivingEntityInvoker) player).gtmaddons$getHandSwingDuration();
-		SwingAnimationComponent animation = stack.getSwingAnimation();
-		boolean restarted = player.handSwinging && player.handSwingTicks == -1;
+		SwingAnimation animation = stack.getSwingAnimation();
+		boolean restarted = player.swinging && player.swingTime == -1;
 
 		String problem = null;
 		if (restarted && animation.type() == SwingAnimationType.NONE) {
@@ -149,8 +149,8 @@ final class SwingDebugger {
 			problem = String.format("mid-swing: tick %d of %d, a new swing only starts from tick %d", swingTickBefore, duration, duration / 2);
 		} else if (!restarted && attackCooldownBefore > 0) {
 			problem = String.format("click dropped: re-clicked within one game tick of a miss, so the game never saw the button released and its miss block (%d ticks left) was still on", attackCooldownBefore);
-		} else if (!restarted && player.isBelowMinimumAttackCharge(stack, 0)) {
-			problem = String.format("click dropped: attack charge %.0f%% is below the item's minimum", player.getAttackCooldownProgress(0f) * 100);
+		} else if (!restarted && player.cannotAttackWithItem(stack, 0)) {
+			problem = String.format("click dropped: attack charge %.0f%% is below the item's minimum", player.getAttackStrengthScale(0f) * 100);
 		} else if (!restarted) {
 			problem = "no swing (riding, no target, or item disabled)";
 		}
@@ -159,19 +159,19 @@ final class SwingDebugger {
 		lastClickNanos = now;
 		// Was an attack actually sent? Only for a click on an entity that wasn't
 		// dropped - and if the item has an attack_range, only within it (the
-		// client swings but sends nothing otherwise; see MinecraftClient.doAttack).
-		boolean onEntity = client.crosshairTarget instanceof EntityHitResult;
+		// client swings but sends nothing otherwise; see Minecraft.doAttack).
+		boolean onEntity = client.hitResult instanceof EntityHitResult;
 		boolean dropped = problem != null && problem.startsWith("click dropped");
-		AttackRangeComponent range = stack.get(DataComponentTypes.ATTACK_RANGE);
-		boolean inItemRange = !onEntity || range == null || range.isWithinRange(player, client.crosshairTarget.getPos());
+		AttackRange range = stack.get(DataComponents.ATTACK_RANGE);
+		boolean inItemRange = !onEntity || range == null || range.isInRange(player, client.hitResult.getLocation());
 		String itemRange = onEntity && !inItemRange ? " | item attack_range: target out of range, swung without sending an attack" : "";
 
 		String details = String.format("\"%s\", aiming at %s, charge %.0f%%, swing %d ticks%s, %s%s%s",
-				stack.isEmpty() ? "empty hand" : stack.getName().getString(), target(client), player.getAttackCooldownProgress(0f) * 100,
+				stack.isEmpty() ? "empty hand" : stack.getHoverName().getString(), target(client), player.getAttackStrengthScale(0f) * 100,
 				duration, effects(player), sinceLast, reach(client, player), itemRange);
 		logWeapon(client, player, stack);
 		Click click = new Click(now, problem, details);
-		click.attackSent = onEntity && !dropped && inItemRange && !player.isRiding();
+		click.attackSent = onEntity && !dropped && inItemRange && !player.isHandsBusy();
 		pending.add(click);
 		// Open the log now, so the server's attack sounds a moment later are recorded.
 		log.openWindow(client);
@@ -183,15 +183,15 @@ final class SwingDebugger {
 	 * it very high), attack_range (the client won't send an attack outside it),
 	 * minimum_attack_charge (clicks below it are dropped), and its cooldown group.
 	 */
-	private void logWeapon(MinecraftClient client, ClientPlayerEntity player, ItemStack stack) {
-		String name = stack.isEmpty() ? "empty hand" : stack.getName().getString();
+	private void logWeapon(Minecraft client, LocalPlayer player, ItemStack stack) {
+		String name = stack.isEmpty() ? "empty hand" : stack.getHoverName().getString();
 		if (!loggedWeapons.add(ShotTracker.parseAmmo(name) != null ? ShotTracker.gunName(name) : name)) return;
 		log.openWindow(client);
 		log.add(String.format("WEAPON  \"%s\" (%s): attack speed %.1f/s (full charge every %.1f ticks), attack damage %.1f, attack_range %s, minimum_attack_charge %s, cooldown group %s",
-				name, Registries.ITEM.getId(stack.getItem()), player.getAttributeValue(EntityAttributes.ATTACK_SPEED),
-				20.0 / Math.max(0.01, player.getAttributeValue(EntityAttributes.ATTACK_SPEED)), player.getAttributeValue(EntityAttributes.ATTACK_DAMAGE),
-				stack.get(DataComponentTypes.ATTACK_RANGE), stack.get(DataComponentTypes.MINIMUM_ATTACK_CHARGE),
-				stack.isEmpty() ? "-" : player.getItemCooldownManager().getGroup(stack)));
+				name, BuiltInRegistries.ITEM.getKey(stack.getItem()), player.getAttributeValue(Attributes.ATTACK_SPEED),
+				20.0 / Math.max(0.01, player.getAttributeValue(Attributes.ATTACK_SPEED)), player.getAttributeValue(Attributes.ATTACK_DAMAGE),
+				stack.get(DataComponents.ATTACK_RANGE), stack.get(DataComponents.MINIMUM_ATTACK_CHARGE),
+				stack.isEmpty() ? "-" : player.getCooldowns().getCooldownGroup(stack)));
 	}
 
 	private final Set<String> loggedWeapons = new LinkedHashSet<>();
@@ -223,14 +223,14 @@ final class SwingDebugger {
 		}
 	}
 
-	void onFrame(MinecraftClient client) {
-		ClientPlayerEntity player = client.player;
+	void onFrame(Minecraft client) {
+		LocalPlayer player = client.player;
 		if (player == null) return;
 		long now = System.nanoTime();
 
-		ItemStack held = player.getStackInHand(Hand.MAIN_HAND);
+		ItemStack held = player.getItemInHand(InteractionHand.MAIN_HAND);
 		int slot = player.getInventory().getSelectedSlot();
-		if (slot == lastSlot && !ItemStack.areEqual(held, lastHeld) && !onlyAmmoChanged(lastHeld, held)) {
+		if (slot == lastSlot && !ItemStack.matches(held, lastHeld) && !onlyAmmoChanged(lastHeld, held)) {
 			String change = describeChange(lastHeld, held);
 			for (Click click : pending) {
 				if (click.itemChange == null && now - click.nanos <= ITEM_CHANGE_NANOS) {
@@ -255,7 +255,7 @@ final class SwingDebugger {
 	 * not, hit or not. Chat only ever gets the case being chased: a hit that
 	 * registered without a fresh swing. With it off, only that case is logged.
 	 */
-	private void report(MinecraftClient client, Click click) {
+	private void report(Minecraft client, Click click) {
 		boolean noFreshSwing = click.problem != null || click.itemChange != null;
 		boolean hit = click.hitNanos >= 0;
 		if (!LOG_ALL_SWINGS && !(hit && noFreshSwing)) return;
@@ -270,7 +270,7 @@ final class SwingDebugger {
 				+ (why.isEmpty() ? "" : " | " + String.join(" + ", why)) + " | " + click.details;
 		log.openWindow(client);
 		log.add("SWING  " + line);
-		if (hit && noFreshSwing) DevLogger.chat(line, Formatting.GOLD);
+		if (hit && noFreshSwing) DevLogger.chat(line, ChatFormatting.GOLD);
 	}
 
 	/**
@@ -279,26 +279,26 @@ final class SwingDebugger {
 	 * were sent but didn't count. Fast flyers can be somewhere else on the
 	 * server by the time the attack arrives (about a ping later).
 	 */
-	private static String reach(MinecraftClient client, ClientPlayerEntity player) {
-		if (!(client.crosshairTarget instanceof EntityHitResult hit) || !(hit.getEntity() instanceof PlayerEntity target)) return "";
-		Vec3d eye = player.getEyePos();
-		Box box = target.getBoundingBox();
-		double reach = eye.distanceTo(new Vec3d(
-				MathHelper.clamp(eye.x, box.minX, box.maxX), MathHelper.clamp(eye.y, box.minY, box.maxY), MathHelper.clamp(eye.z, box.minZ, box.maxZ)));
+	private static String reach(Minecraft client, LocalPlayer player) {
+		if (!(client.hitResult instanceof EntityHitResult hit) || !(hit.getEntity() instanceof Player target)) return "";
+		Vec3 eye = player.getEyePosition();
+		AABB box = target.getBoundingBox();
+		double reach = eye.distanceTo(new Vec3(
+				Mth.clamp(eye.x, box.minX, box.maxX), Mth.clamp(eye.y, box.minY, box.maxY), Mth.clamp(eye.z, box.minZ, box.maxZ)));
 		// Other players' velocity isn't sent to the client; their movement since last tick is.
-		double targetSpeed = new Vec3d(target.getX() - target.lastX, target.getY() - target.lastY, target.getZ() - target.lastZ).length() * 20;
+		double targetSpeed = new Vec3(target.getX() - target.xo, target.getY() - target.yo, target.getZ() - target.zo).length() * 20;
 		return String.format(" | reach %.2f blocks, ping %dms, you: %s %.1f b/s, target: %s %.1f b/s",
-				reach, ShotTracker.ping(client), movement(player), player.getVelocity().length() * 20, movement(target), targetSpeed);
+				reach, ShotTracker.ping(client), movement(player), player.getDeltaMovement().length() * 20, movement(target), targetSpeed);
 	}
 
-	private static String movement(PlayerEntity player) {
-		if (player.isGliding()) return "gliding";
+	private static String movement(Player player) {
+		if (player.isFallFlying()) return "gliding";
 		if (player.getAbilities().flying) return "flying";
-		return player.isOnGround() ? "on ground" : "in the air";
+		return player.onGround() ? "on ground" : "in the air";
 	}
 
-	private static String target(MinecraftClient client) {
-		HitResult hit = client.crosshairTarget;
+	private static String target(Minecraft client) {
+		HitResult hit = client.hitResult;
 		if (hit == null || hit.getType() == HitResult.Type.MISS) return "air";
 		if (hit instanceof EntityHitResult entityHit) {
 			Entity entity = entityHit.getEntity();
@@ -308,42 +308,42 @@ final class SwingDebugger {
 	}
 
 	/** Haste and mining fatigue change how long a swing takes. */
-	private static String effects(ClientPlayerEntity player) {
+	private static String effects(LocalPlayer player) {
 		StringBuilder out = new StringBuilder();
-		StatusEffectInstance haste = player.getStatusEffect(StatusEffects.HASTE);
-		StatusEffectInstance fatigue = player.getStatusEffect(StatusEffects.MINING_FATIGUE);
+		MobEffectInstance haste = player.getEffect(MobEffects.HASTE);
+		MobEffectInstance fatigue = player.getEffect(MobEffects.MINING_FATIGUE);
 		if (haste != null) out.append(" (haste ").append(haste.getAmplifier() + 1).append(")");
 		if (fatigue != null) out.append(" (mining fatigue ").append(fatigue.getAmplifier() + 1).append(")");
 		return out.toString();
 	}
 
 	private static String describeChange(ItemStack before, ItemStack after) {
-		if (!ItemStack.areItemsEqual(before, after)) {
-			return String.format("item swapped \"%s\" -> \"%s\"", before.getName().getString(), after.getName().getString());
+		if (!ItemStack.isSameItem(before, after)) {
+			return String.format("item swapped \"%s\" -> \"%s\"", before.getHoverName().getString(), after.getHoverName().getString());
 		}
 		if (before.getCount() != after.getCount()) return String.format("count %d -> %d", before.getCount(), after.getCount());
-		if (before.getDamage() != after.getDamage()) return String.format("durability damage %d -> %d", before.getDamage(), after.getDamage());
-		if (!Objects.equals(before.getName().getString(), after.getName().getString())) {
-			return String.format("name \"%s\" -> \"%s\"", before.getName().getString(), after.getName().getString());
+		if (before.getDamageValue() != after.getDamageValue()) return String.format("durability damage %d -> %d", before.getDamageValue(), after.getDamageValue());
+		if (!Objects.equals(before.getHoverName().getString(), after.getHoverName().getString())) {
+			return String.format("name \"%s\" -> \"%s\"", before.getHoverName().getString(), after.getHoverName().getString());
 		}
 		return "item data changed: " + changedComponents(before, after);
 	}
 
 	/** Which of the item's components differ, e.g. "minecraft:lore, minecraft:custom_data". */
 	private static String changedComponents(ItemStack before, ItemStack after) {
-		Set<ComponentType<?>> types = new LinkedHashSet<>(before.getComponents().getTypes());
-		types.addAll(after.getComponents().getTypes());
+		Set<DataComponentType<?>> types = new LinkedHashSet<>(before.getComponents().keySet());
+		types.addAll(after.getComponents().keySet());
 		List<String> changed = new ArrayList<>();
-		for (ComponentType<?> type : types) {
-			if (!Objects.equals(before.get(type), after.get(type))) changed.add(String.valueOf(Registries.DATA_COMPONENT_TYPE.getId(type)));
+		for (DataComponentType<?> type : types) {
+			if (!Objects.equals(before.get(type), after.get(type))) changed.add(String.valueOf(BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type)));
 		}
 		return changed.isEmpty() ? "unknown" : String.join(", ", changed);
 	}
 
 	/** A gun's name changing only in its ammo readout ("«14/576970»" -> "«13/...»") - normal, not worth flagging. */
 	private static boolean onlyAmmoChanged(ItemStack before, ItemStack after) {
-		String a = before.getName().getString(), b = after.getName().getString();
-		return ItemStack.areItemsEqual(before, after) && before.getCount() == after.getCount()
+		String a = before.getHoverName().getString(), b = after.getHoverName().getString();
+		return ItemStack.isSameItem(before, after) && before.getCount() == after.getCount()
 				&& ShotTracker.parseAmmo(a) != null && ShotTracker.parseAmmo(b) != null
 				&& ShotTracker.gunName(a).equals(ShotTracker.gunName(b));
 	}

@@ -1,9 +1,9 @@
 package com.example.gtmaddons;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.Component;
 
 /**
  * Settings > Boost angle: while gliding, shows how far up you're looking
@@ -21,11 +21,11 @@ public final class BoostAngleHud {
 	private BoostAngleHud() {}
 
 	/** The line to show (drawn where HudLayout puts it), or null when not gliding. */
-	public static Text text(MinecraftClient client) {
-		ClientPlayerEntity player = client.player;
-		if (player == null || !player.isGliding()) return null;
+	public static Component text(Minecraft client) {
+		LocalPlayer player = client.player;
+		if (player == null || !player.isFallFlying()) return null;
 
-		float pitch = player.getPitch();
+		float pitch = player.getXRot();
 		float up = -pitch;
 		String angle = up >= 0 ? String.format("%.1f° up", up) : String.format("%.1f° down", -up);
 		boolean canBoost = pitch < BOOST_MAX_PITCH;
@@ -33,6 +33,6 @@ public final class BoostAngleHud {
 				? "✔ Boost ready · " + angle
 				: String.format("✘ Look up %.1f° more · %s", Math.max(0.1f, pitch - BOOST_MAX_PITCH), angle);
 
-		return Text.literal(label).formatted(canBoost ? Formatting.GREEN : Formatting.RED);
+		return Component.literal(label).withStyle(canBoost ? ChatFormatting.GREEN : ChatFormatting.RED);
 	}
 }

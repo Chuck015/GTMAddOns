@@ -2,13 +2,13 @@ package com.example.gtmaddons;
 
 import com.example.gtmaddons.gun.DevFilter;
 import com.example.gtmaddons.gun.DevLogger;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.Locale;
 
@@ -59,11 +59,11 @@ public final class CombatTracker {
 	 * hit with another player. GTM extends the tag without saying so, so this is an estimate: it stops at 0.0 until
 	 * GTM's "no longer in combat" message arrives. Red while over 10 s, yellow to 5 s, green after.
 	 */
-	public Text timerText() {
+	public Component timerText() {
 		if (!tagged) return null;
 		double left = Math.max(0.0, (TAG_NANOS - (System.nanoTime() - lastActivityNanos)) / 1e9);
-		Formatting color = left > 10.0 ? Formatting.RED : left > 5.0 ? Formatting.YELLOW : Formatting.GREEN;
-		return Text.literal(String.format(Locale.ROOT, "⚔ In combat %.1fs", left)).formatted(color);
+		ChatFormatting color = left > 10.0 ? ChatFormatting.RED : left > 5.0 ? ChatFormatting.YELLOW : ChatFormatting.GREEN;
+		return Component.literal(String.format(Locale.ROOT, "⚔ In combat %.1fs", left)).withStyle(color);
 	}
 
 	public int jetpacksAtStart() {
@@ -74,11 +74,11 @@ public final class CombatTracker {
 		return wingsuitsAtStart;
 	}
 
-	public void onFrame(MinecraftClient client) {
+	public void onFrame(Minecraft client) {
 		if (!tagged) return;
-		ClientPlayerEntity player = client.player;
+		LocalPlayer player = client.player;
 		if (player == null) end("left the world");
-		else if (player.isDead()) end("you died");
+		else if (player.isDeadOrDying()) end("you died");
 		else if (System.nanoTime() - lastActivityNanos > FALLBACK_NANOS) end("3 minutes with no player hits (safety net)");
 	}
 
@@ -92,7 +92,7 @@ public final class CombatTracker {
 	private void end(String reason) {
 		if (!tagged) return;
 		tagged = false;
-		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Combat tag cleared: " + reason, Formatting.GREEN);
+		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Combat tag cleared: " + reason, ChatFormatting.GREEN);
 	}
 
 	/**
@@ -103,11 +103,11 @@ public final class CombatTracker {
 	 *   tag (tags don't last over death).
 	 */
 	/** GTM's "WASTED" death title - you died, and tags don't last over death. */
-	public void onTitle(Text text) {
+	public void onTitle(Component text) {
 		if (text.getString().trim().equalsIgnoreCase("WASTED")) end("died (WASTED)");
 	}
 
-	public void onMessage(Text text) {
+	public void onMessage(Component text) {
 		// Cop mode: being arrested ends the fight and the tag, like dying. Arresting someone changes nothing for you.
 		FightTracker.Arrest arrest = FightTracker.parseArrest(text.getString());
 		if (arrest != null) {
@@ -150,23 +150,23 @@ public final class CombatTracker {
 	 * an end message for a tag it didn't start.) causeId is -1 when nothing caused the damage (a fall, fire).
 	 */
 	public void onDamage(int targetId, int causeId) {
-		var player = MinecraftClient.getInstance().player;
+		var player = Minecraft.getInstance().player;
 		if (!tagged || player == null) return;
 		int me = player.getId();
 		if (causeId == me || (targetId == me && causeId >= 0)) lastActivityNanos = System.nanoTime();
 	}
 
 	private void refresh() {
-		ClientPlayerEntity player = MinecraftClient.getInstance().player;
+		LocalPlayer player = Minecraft.getInstance().player;
 		if (!tagged && player != null) {
 			tagged = true;
-			if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Combat tag started", Formatting.RED);
+			if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Combat tag started", ChatFormatting.RED);
 			// Snapshot what you brought into the fight.
-			PlayerInventory inventory = player.getInventory();
+			Inventory inventory = player.getInventory();
 			jetpacksAtStart = 0;
 			wingsuitsAtStart = 0;
-			for (int i = 0; i < inventory.size(); i++) {
-				ItemStack stack = inventory.getStack(i);
+			for (int i = 0; i < inventory.getContainerSize(); i++) {
+				ItemStack stack = inventory.getItem(i);
 				if (PvpCategory.isJetpack(stack) || (i == PvpCategory.CHEST_INVENTORY_INDEX && PvpCategory.isWornJetpack(stack))) jetpacksAtStart++;
 				if (PvpCategory.isWingsuit(stack)) wingsuitsAtStart++;
 			}

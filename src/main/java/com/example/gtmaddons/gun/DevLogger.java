@@ -1,21 +1,22 @@
 package com.example.gtmaddons.gun;
 
 import com.example.gtmaddons.Settings;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.text.Style;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.Hand;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
+import com.example.gtmaddons.compat.Mc;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -123,7 +124,7 @@ public final class DevLogger {
 	}
 
 	public Path logPath() {
-		return MinecraftClient.getInstance().runDirectory.toPath().resolve(LOG_FILE);
+		return Minecraft.getInstance().gameDirectory.toPath().resolve(LOG_FILE);
 	}
 
 	/** Where the on/off choice for each filter is saved. */
@@ -179,10 +180,10 @@ public final class DevLogger {
 				+ " | frame hooks %.3f ms avg / %.2f max, HUD %.3f ms avg / %.2f max"
 				+ " | dev tools themselves %.3f ms avg / %.2f max (not counted above)",
 				seconds, frames, frames / seconds, mod, share, frameMs, hooks, hooksMax, hud, hudMax, dev, devMax);
-		openWindow(MinecraftClient.getInstance());
+		openWindow(Minecraft.getInstance());
 		add(line);
 		// Chat only when it matters.
-		if (share >= 3.0) chat(String.format("Performance: the mod uses %.2f%% of each frame (%.3f ms) - see the dev log", share, mod), Formatting.RED);
+		if (share >= 3.0) chat(String.format("Performance: the mod uses %.2f%% of each frame (%.3f ms) - see the dev log", share, mod), ChatFormatting.RED);
 		java.util.Arrays.fill(perfTotal, 0L);
 		java.util.Arrays.fill(perfMax, 0L);
 		perfFrames = 0;
@@ -203,10 +204,10 @@ public final class DevLogger {
 	}
 
 	/** Called first thing every frame: a long gap since the last frame in the world is a stall. */
-	private void checkStall(MinecraftClient client) {
+	private void checkStall(Minecraft client) {
 		long now = System.nanoTime();
 		long previous = lastFrameNanos;
-		lastFrameNanos = client.world != null ? now : 0L;
+		lastFrameNanos = client.level != null ? now : 0L;
 		long reload = reloadNanos;
 		boolean reloaded = reload > reloadReportedNanos;
 		if (reloaded) reloadReportedNanos = reload;
@@ -215,15 +216,15 @@ public final class DevLogger {
 			long ms = (now - previous) / 1_000_000L;
 			boolean reloadDuring = reload >= previous && reload <= now;
 			String line = String.format("STALL  the game froze for %d ms (%.1f s), ending at %s | resource reload during it: %s | connected: %s",
-					ms, ms / 1000.0, java.time.LocalTime.now().withNano(0), reloadDuring ? "YES" : "no", client.getNetworkHandler() != null ? "yes" : "no");
+					ms, ms / 1000.0, java.time.LocalTime.now().withNano(0), reloadDuring ? "YES" : "no", client.getConnection() != null ? "yes" : "no");
 			writeBlock(null, List.of(line));
-			if (ms >= 1000L) chat(line, Formatting.RED);
+			if (ms >= 1000L) chat(line, ChatFormatting.RED);
 		} else if (reloaded) {
 			writeBlock(null, List.of("RELOAD  resources were reloaded (the block textures were rebuilt) at " + java.time.LocalTime.now().withNano(0)));
 		}
 	}
 
-	public void onFrame(MinecraftClient client) {
+	public void onFrame(Minecraft client) {
 		checkStall(client);
 		if (!enabled) return;
 		if (windowEndNanos != 0L && System.nanoTime() >= windowEndNanos) flushWindow();
@@ -236,14 +237,14 @@ public final class DevLogger {
 		if (wants(DevFilter.BUSINESS)) pve.onFrame(client);
 		reportCategoryChange(client);
 
-		ClientPlayerEntity player = client.player;
+		LocalPlayer player = client.player;
 		if (player == null) {
 			lastAmmo = null;
 			return;
 		}
 
-		ItemStack held = player.getStackInHand(Hand.MAIN_HAND);
-		String name = held.isEmpty() ? "" : held.getName().getString();
+		ItemStack held = player.getItemInHand(InteractionHand.MAIN_HAND);
+		String name = held.isEmpty() ? "" : held.getHoverName().getString();
 		Integer ammo = ShotTracker.parseAmmo(name);
 		String gun = ammo != null ? ShotTracker.gunName(name) : null;
 		if (gun != null && gun.equals(lastGun) && lastAmmo != null && ammo < lastAmmo) {
@@ -256,14 +257,14 @@ public final class DevLogger {
 	}
 
 	/** Better near hid a /near reply that came without a command (see NearList.isUnsolicitedReply). */
-	public void noteHiddenNear(Text text) {
+	public void noteHiddenNear(Component text) {
 		if (!enabled || !wants(DevFilter.NEAR)) return;
 		openWindow(client());
 		add("HIDDEN near reply (no command was run in the 15 s before it): " + describe(text));
 	}
 
-	private static MinecraftClient client() {
-		return MinecraftClient.getInstance();
+	private static Minecraft client() {
+		return Minecraft.getInstance();
 	}
 
 	/** A command you sent (without the slash) - /near's reply gets captured (see NearLogger). */
@@ -272,20 +273,20 @@ public final class DevLogger {
 	}
 
 	/** A left click, just before the game handles it (see SwingDebugger). */
-	public void beforeAttack(MinecraftClient client, int attackCooldown) {
+	public void beforeAttack(Minecraft client, int attackCooldown) {
 		if (wants(DevFilter.SWINGS)) swing.beforeAttack(client, attackCooldown);
 		if (wants(DevFilter.MELEE_DAMAGE)) melee.beforeAttack(client);
 	}
 
 	/** The same left click, just after. */
-	public void afterAttack(MinecraftClient client) {
+	public void afterAttack(Minecraft client) {
 		if (wants(DevFilter.SWINGS)) swing.afterAttack(client);
 	}
 
 	/** Says in chat whenever your PvP category changes, and what it's based on. */
 	private long lastCategoryCheckNanos = 0L;
 
-	private void reportCategoryChange(MinecraftClient client) {
+	private void reportCategoryChange(Minecraft client) {
 		if (client.player == null) return;
 		// The category only changes when the inventory does: a few checks a second are plenty.
 		long checkedAt = System.nanoTime();
@@ -296,14 +297,14 @@ public final class DevLogger {
 		lastCategory = category;
 		if (!wants(DevFilter.CATEGORY)) return;
 		String why = com.example.gtmaddons.PvpCategory.explain(client.player);
-		chat("PvP category: " + category.label + " | " + why, Formatting.AQUA);
+		chat("PvP category: " + category.label + " | " + why, ChatFormatting.AQUA);
 		if (windowOpen()) add("CATEGORY  " + category.label + "  " + why);
 	}
 
 	/** Dev info line in chat. */
-	public static void chat(String message, Formatting color) {
-		MinecraftClient client = MinecraftClient.getInstance();
-		if (client.player != null) client.player.sendMessage(Text.literal(prefix() + message).formatted(color), false);
+	public static void chat(String message, ChatFormatting color) {
+		Minecraft client = Minecraft.getInstance();
+		if (client.player != null) Mc.chat(client.player, Component.literal(prefix() + message).withStyle(color));
 	}
 
 	/** "[Dev] " in dev mode, "[QA] " in QA mode, so chat shows which one is on. */
@@ -314,13 +315,20 @@ public final class DevLogger {
 	/** A finished melee combo (see ComboTracker). */
 	public void onComboResult(com.example.gtmaddons.ComboTracker.ComboResult combo) {
 		if (!wants(DevFilter.COMBOS)) return;
-		openWindow(MinecraftClient.getInstance());
+		openWindow(Minecraft.getInstance());
 		String line = String.format("[%s] %s  %d %s (%s)  -> %s", combo.category().label,
 				combo.enemy() ? combo.opponent() + "'s combo on you" : "your combo on " + combo.opponent(),
 				combo.hits(), combo.hits() == 1 ? "hit" : "hits", combo.firstHit() ? "first hit" : "from a break",
 				combo.broken() ? (combo.enemy() ? "BROKEN by you" : "BROKEN by them") : "ended unbroken");
 		add("COMBO  " + line);
-		chat("Combo " + line, Formatting.GRAY);
+		chat("Combo " + line, ChatFormatting.GRAY);
+	}
+
+	/** One step of a melee exchange, for working out GTM's combo rules (see ComboTracker). The busiest lines stay out of chat. */
+	public void onComboTiming(String line, boolean inChat) {
+		openWindow(Minecraft.getInstance());
+		add("COMBO TIMING  " + line);
+		if (inChat) chat("Combo " + line, ChatFormatting.GRAY);
 	}
 
 	/** ShotTracker's verdict for a shot, added to the log and the chat summary. */
@@ -328,7 +336,7 @@ public final class DevLogger {
 		if (!enabled) return;
 		burstResults.add(r);
 		String netReason = ShotTracker.INSTANCE.takeNetNote();
-		if (netReason != null && wants(DevFilter.NET_LAUNCHER)) netLauncher.onResult(MinecraftClient.getInstance(), r, netReason);
+		if (netReason != null && wants(DevFilter.NET_LAUNCHER)) netLauncher.onResult(Minecraft.getInstance(), r, netReason);
 		if (!windowOpen() || !wants(DevFilter.SHOTS)) return;
 		StringBuilder line = new StringBuilder("RESULT  [").append(r.category().label).append("] ").append(r.gun()).append(": ");
 		if (r.hit()) {
@@ -348,7 +356,7 @@ public final class DevLogger {
 	}
 
 	/** Opens (or extends) the logging window. */
-	void openWindow(MinecraftClient client) {
+	void openWindow(Minecraft client) {
 		if (!windowOpen()) {
 			flushWindow();
 			windowStartNanos = System.nanoTime();
@@ -357,13 +365,13 @@ public final class DevLogger {
 		windowEndNanos = System.nanoTime() + WINDOW_NANOS;
 	}
 
-	private void onShot(MinecraftClient client, ItemStack gun, int ammoBefore, int ammoAfter) {
+	private void onShot(Minecraft client, ItemStack gun, int ammoBefore, int ammoAfter) {
 		openWindow(client);
 		shotNumber++;
-		if (wants(DevFilter.NET_LAUNCHER) && ShotTracker.countsOnlyWingsuitHits(ShotTracker.gunName(gun.getName().getString()))) netLauncher.onShot(client);
+		if (wants(DevFilter.NET_LAUNCHER) && ShotTracker.countsOnlyWingsuitHits(ShotTracker.gunName(gun.getHoverName().getString()))) netLauncher.onShot(client);
 
 		if (wants(DevFilter.SHOTS)) {
-			add(String.format("SHOT #%d  gun=\"%s\"  ammo %d -> %d", shotNumber, gun.getName().getString(), ammoBefore, ammoAfter));
+			add(String.format("SHOT #%d  gun=\"%s\"  ammo %d -> %d", shotNumber, gun.getHoverName().getString(), ammoBefore, ammoAfter));
 		}
 		if (wants(DevFilter.AIM)) describeAim(client);
 	}
@@ -376,7 +384,7 @@ public final class DevLogger {
 	 * ("blank" hits) send no damage event, so they won't appear here.
 	 */
 	public void onEntityDamage(int entityId, String damageType, int causeId, int directId) {
-		MinecraftClient client = MinecraftClient.getInstance();
+		Minecraft client = Minecraft.getInstance();
 		int me = client.player != null ? client.player.getId() : -1;
 		boolean involvesMe = entityId == me || causeId == me;
 		if (involvesMe) {
@@ -399,12 +407,12 @@ public final class DevLogger {
 	 * as on a wingsuit (the Net Launcher only counts hits on those).
 	 */
 	private static String targetGear(int entityId) {
-		MinecraftClient client = MinecraftClient.getInstance();
-		Entity entity = entityId >= 0 && client.world != null ? client.world.getEntityById(entityId) : null;
-		if (!(entity instanceof PlayerEntity player)) return "";
-		ItemStack chest = player.getEquippedStack(net.minecraft.entity.EquipmentSlot.CHEST);
+		Minecraft client = Minecraft.getInstance();
+		Entity entity = entityId >= 0 && client.level != null ? client.level.getEntity(entityId) : null;
+		if (!(entity instanceof Player player)) return "";
+		ItemStack chest = player.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.CHEST);
 		return String.format("  target chest=\"%s\" gliding=%s on-wingsuit=%s",
-				chest.isEmpty() ? "-" : chest.getName().getString(), player.isGliding(), ShotTracker.isOnWingsuit(player));
+				chest.isEmpty() ? "-" : chest.getHoverName().getString(), player.isFallFlying(), ShotTracker.isOnWingsuit(player));
 	}
 
 	/**
@@ -412,20 +420,20 @@ public final class DevLogger {
 	 * don't go through the chat event). Combo and hit-cooldown messages open
 	 * a window by themselves.
 	 */
-	public void onActionBar(Text text) {
+	public void onActionBar(Component text) {
 		if (!enabled) return;
 		near.onMessage(text, true);
 		String lower = text.getString().toLowerCase(java.util.Locale.ROOT);
-		if (lower.contains("combo") || lower.contains("recovering")) openWindow(MinecraftClient.getInstance());
+		if (lower.contains("combo") || lower.contains("recovering")) openWindow(Minecraft.getInstance());
 		if (!windowOpen() || !wants(DevFilter.MESSAGES)) return;
 		add("ACTION_BAR  " + describe(text));
 	}
 
 	private static String heldItemName(int entityId) {
-		MinecraftClient client = MinecraftClient.getInstance();
-		Entity entity = entityId >= 0 && client.world != null ? client.world.getEntityById(entityId) : null;
-		return entity instanceof LivingEntity living && !living.getMainHandStack().isEmpty()
-				? living.getMainHandStack().getName().getString()
+		Minecraft client = Minecraft.getInstance();
+		Entity entity = entityId >= 0 && client.level != null ? client.level.getEntity(entityId) : null;
+		return entity instanceof LivingEntity living && !living.getMainHandItem().isEmpty()
+				? living.getMainHandItem().getHoverName().getString()
 				: "-";
 	}
 
@@ -434,10 +442,10 @@ public final class DevLogger {
 		add(String.format("ENTITY_STATUS  entity=%s  status=%d", describe(entity), status));
 	}
 
-	public void onSound(String soundId, String category, Vec3d position, float volume, float pitch) {
+	public void onSound(String soundId, String category, Vec3 position, float volume, float pitch) {
 		if (!enabled) return;
-		MinecraftClient client = MinecraftClient.getInstance();
-		double distance = position != null && client.player != null ? client.player.getEyePos().distanceTo(position) : Double.NaN;
+		Minecraft client = Minecraft.getInstance();
+		double distance = position != null && client.player != null ? client.player.getEyePosition().distanceTo(position) : Double.NaN;
 		movement.onSound(soundId, distance);
 		if (wants(DevFilter.SWINGS)) swing.onSound(soundId, distance);
 		if (!windowOpen() || !wants(DevFilter.SOUNDS)) return;
@@ -447,7 +455,7 @@ public final class DevLogger {
 
 	public void onEntitySound(String soundId, String category, int entityId, float volume, float pitch) {
 		if (!enabled) return;
-		MinecraftClient client = MinecraftClient.getInstance();
+		Minecraft client = Minecraft.getInstance();
 		if (client.player != null && entityId == client.player.getId()) movement.onSound(soundId, 0.0);
 		if (!windowOpen() || !wants(DevFilter.SOUNDS)) return;
 		add(String.format("SOUND  %s  category=%s  volume=%.2f  pitch=%.2f  from entity %s",
@@ -470,13 +478,13 @@ public final class DevLogger {
 		add(String.format("COOLDOWN  %s  %d ticks (%dms)", group, ticks, ticks * 50));
 	}
 
-	public void onTitle(String kind, Text text) {
+	public void onTitle(String kind, Component text) {
 		if (!windowOpen() || !wants(DevFilter.TITLES)) return;
 		add(String.format("%s  %s", kind, describe(text)));
 	}
 
 	/** Chat messages. Action bars are logged by onActionBar, which sees all of them. */
-	public void onMessage(Text text, boolean actionBar) {
+	public void onMessage(Component text, boolean actionBar) {
 		// Action bars reach the /near capture through onActionBar instead.
 		if (enabled && !actionBar) near.onMessage(text, false);
 		if (!actionBar && wants(DevFilter.PRICES)) pve.onChat(text.getString());
@@ -487,51 +495,51 @@ public final class DevLogger {
 	// ---- Aim and health ----
 
 	/** Records every player the crosshair ray passes through, and the first block in the way. */
-	private void describeAim(MinecraftClient client) {
-		ClientPlayerEntity player = client.player;
-		if (player == null || client.world == null) return;
-		Vec3d eye = player.getEyePos();
-		Vec3d end = eye.add(player.getRotationVec(1.0f).multiply(AIM_RANGE));
+	private void describeAim(Minecraft client) {
+		LocalPlayer player = client.player;
+		if (player == null || client.level == null) return;
+		Vec3 eye = player.getEyePosition();
+		Vec3 end = eye.add(player.getViewVector(1.0f).scale(AIM_RANGE));
 
-		BlockHitResult block = client.world.raycast(new RaycastContext(
-				eye, end, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
-		double blockDistance = block.getType() == HitResult.Type.MISS ? Double.MAX_VALUE : eye.distanceTo(block.getPos());
+		BlockHitResult block = client.level.clip(new ClipContext(
+				eye, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+		double blockDistance = block.getType() == HitResult.Type.MISS ? Double.MAX_VALUE : eye.distanceTo(block.getLocation());
 		add(blockDistance == Double.MAX_VALUE
 				? "  aim: no block within " + (int) AIM_RANGE + " blocks"
 				: String.format("  aim: first block at %.1f blocks", blockDistance));
 
 		boolean any = false;
-		for (PlayerEntity other : client.world.getPlayers()) {
+		for (Player other : client.level.players()) {
 			if (other == player) continue;
-			Box box = other.getBoundingBox();
-			Optional<Vec3d> hit = box.raycast(eye, end);
+			AABB box = other.getBoundingBox();
+			Optional<Vec3> hit = box.clip(eye, end);
 			if (hit.isEmpty()) continue;
 			any = true;
 			double distance = eye.distanceTo(hit.get());
 			double heightOnBody = hit.get().y - other.getY();
 			add(String.format("  aim: crosses player %s at %.1f blocks, %.2f blocks up their body (%s)%s",
 					other.getName().getString(), distance, heightOnBody,
-					heightOnBody >= other.getHeight() - 0.5 ? "head area" : "body",
+					heightOnBody >= other.getBbHeight() - 0.5 ? "head area" : "body",
 					distance > blockDistance ? " - BEHIND A BLOCK" : ""));
 		}
 		if (!any) add("  aim: no player in the crosshair ray");
 	}
 
-	private void snapshotHealth(MinecraftClient client) {
+	private void snapshotHealth(Minecraft client) {
 		healthAtShot.clear();
-		if (client.world == null || client.player == null) return;
-		for (Entity entity : client.world.getEntities()) {
+		if (client.level == null || client.player == null) return;
+		for (Entity entity : client.level.entitiesForRendering()) {
 			if (entity instanceof LivingEntity living && entity != client.player
-					&& entity.squaredDistanceTo(client.player) < HEALTH_RANGE * HEALTH_RANGE) {
+					&& entity.distanceToSqr(client.player) < HEALTH_RANGE * HEALTH_RANGE) {
 				healthAtShot.put(entity.getId(), living.getHealth());
 			}
 		}
 	}
 
-	private void checkHealthChanges(MinecraftClient client) {
-		if (client.world == null) return;
+	private void checkHealthChanges(Minecraft client) {
+		if (client.level == null) return;
 		for (Map.Entry<Integer, Float> entry : healthAtShot.entrySet()) {
-			if (client.world.getEntityById(entry.getKey()) instanceof LivingEntity living) {
+			if (client.level.getEntity(entry.getKey()) instanceof LivingEntity living) {
 				float now = living.getHealth();
 				if (now != entry.getValue()) {
 					add(String.format("HEALTH  %s  %.1f -> %.1f", describe(living), entry.getValue(), now));
@@ -546,19 +554,19 @@ public final class DevLogger {
 	/** The movement keys over a finished fight (see MovementInputTracker): a chat line and a block in the log. */
 	public void fightMovement(String description, String json) {
 		if (!wants(DevFilter.FIGHTS)) return;
-		chat("Movement: " + description, Formatting.GRAY);
+		chat("Movement: " + description, ChatFormatting.GRAY);
 		writeBlock("FIGHT MOVEMENT", List.of(description, json));
 	}
 
 	/** A finished fight's opponent, as classified from their gear (see GearTracker): a chat line and a block in the log. */
 	public void fightGear(String opponent, String description, String json, String trackJson) {
 		if (!wants(DevFilter.FIGHTS)) return;
-		chat("Opponent " + (opponent != null ? opponent : "(unknown)") + " looked like: " + description, Formatting.GRAY);
+		chat("Opponent " + (opponent != null ? opponent : "(unknown)") + " looked like: " + description, ChatFormatting.GRAY);
 		writeBlock("FIGHT GEAR  " + (opponent != null ? opponent : "(unknown)"), List.of(description, json, "track: " + trackJson));
 	}
 
 	/** A screen was opened (or resized): the business information catcher looks at it (see PveLogger). */
-	public void onScreenOpened(net.minecraft.client.gui.screen.Screen screen) {
+	public void onScreenOpened(net.minecraft.client.gui.screens.Screen screen) {
 		if (wants(DevFilter.BUSINESS)) pve.onScreenOpened(client(), screen);
 	}
 
@@ -615,11 +623,11 @@ public final class DevLogger {
 
 		if (wants(DevFilter.SHOTS)) sendBurstSummary();
 		if (burstResults.isEmpty() && meleeDealt + meleeTaken > 0 && wants(DevFilter.COMBOS)) {
-			MinecraftClient client = MinecraftClient.getInstance();
+			Minecraft client = Minecraft.getInstance();
 			if (client.player != null) {
 				// QA mode doesn't write the log, so don't say "logged".
-				client.player.sendMessage(Text.literal(String.format("%s%s a melee exchange: %d hits dealt, %d taken",
-						prefix(), saveLog ? "logged" : "saw", meleeDealt, meleeTaken)).formatted(Formatting.GRAY), false);
+				Mc.chat(client.player, Component.literal(String.format("%s%s a melee exchange: %d hits dealt, %d taken",
+						prefix(), saveLog ? "logged" : "saw", meleeDealt, meleeTaken)).withStyle(ChatFormatting.GRAY));
 			}
 		}
 
@@ -638,7 +646,7 @@ public final class DevLogger {
 	 *  | gunshot note_block.snare | response 47ms | ping 45ms"
 	 */
 	private void sendBurstSummary() {
-		MinecraftClient client = MinecraftClient.getInstance();
+		Minecraft client = Minecraft.getInstance();
 		if (client.player == null || burstResults.isEmpty()) return;
 
 		Map<String, List<ShotResult>> byGun = new java.util.LinkedHashMap<>();
@@ -678,7 +686,7 @@ public final class DevLogger {
 			msg.append(" | sounds ").append(sounds.isEmpty() ? "none" : String.join(", ", sounds));
 			if (response != null) msg.append(" | response ").append(response).append("ms");
 			msg.append(" | ping ").append(results.get(results.size() - 1).pingMs()).append("ms");
-			client.player.sendMessage(Text.literal(msg.toString()).formatted(Formatting.GRAY), false);
+			Mc.chat(client.player, Component.literal(msg.toString()).withStyle(ChatFormatting.GRAY));
 		}
 	}
 
@@ -686,13 +694,13 @@ public final class DevLogger {
 
 	private static String entityName(int id) {
 		if (id < 0) return "none";
-		MinecraftClient client = MinecraftClient.getInstance();
-		Entity entity = client.world != null ? client.world.getEntityById(id) : null;
+		Minecraft client = Minecraft.getInstance();
+		Entity entity = client.level != null ? client.level.getEntity(id) : null;
 		return entity != null ? describe(entity) : "#" + id + "(unknown)";
 	}
 
 	private static String describe(Entity entity) {
-		return entity.getName().getString() + "[" + entity.getType().getUntranslatedName() + " #" + entity.getId() + "]";
+		return entity.getName().getString() + "[" + entity.getType().toShortString() + " #" + entity.getId() + "]";
 	}
 
 	/**
@@ -700,7 +708,7 @@ public final class DevLogger {
 	 * font spelled out - hitmarkers are often a private-use character drawn
 	 * from a resource-pack font, which would otherwise look empty.
 	 */
-	private static String describe(Text text) {
+	private static String describe(Component text) {
 		StringBuilder plain = new StringBuilder();
 		List<String> fonts = new ArrayList<>();
 		text.visit((Style style, String part) -> {

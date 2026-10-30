@@ -49,6 +49,8 @@ public final class Settings {
 	public boolean hideRecipeBook = false;
 	/** Names above items lying on the ground, only for items in plain view (DroppedItemLabels). */
 	public boolean droppedItemNames = false;
+	/** The enchantment glint on the item named Black Ops Boots (BlackOpsGlint). */
+	public boolean blackOpsGlint = false;
 	/** An icon after the name of players who run GTMAddOns (tab list and nametags). */
 	public boolean showModUsers = false;
 
@@ -60,6 +62,8 @@ public final class Settings {
 
 	/** 0-100: how much of the cobweb texture is made see-through (CobwebTransparency). */
 	public int cobwebTransparency = 0;
+	/** QOL: how see-through the survival inventory's panel is, 0-100% (100 = fully clear; see InventoryTransparency). */
+	public int inventoryTransparency = 0;
 
 	/** Crouch while flying and sneaking, like 1.8 (OldSneaking). */
 	public boolean oldSneaking = false;
@@ -67,7 +71,7 @@ public final class Settings {
 	/** A HUD line with the seconds left of the combat tag (CombatTracker.timerText). */
 	public boolean combatTimer = false;
 
-	/** Draw every player's head as a fish (FishHeads; 1.19.4 only for now). */
+	/** Draw every player's head as a fish cat (FishHeads). */
 	public boolean fishHeads = false;
 
 	/** The 25 / 50 / 100 fights choice of the stats screens (FightViews). */

@@ -1,6 +1,7 @@
 package com.example.gtmaddons.gui;
 
 import com.example.gtmaddons.PvpCategory;
+import com.example.gtmaddons.compat.Gfx;
 import com.example.gtmaddons.gui.InsightScreen.Insight;
 import com.example.gtmaddons.gun.GunType;
 import com.example.gtmaddons.rating.Ratings;
@@ -11,12 +12,11 @@ import com.example.gtmaddons.stats.PlayerStats.GunStat;
 import com.example.gtmaddons.stats.PlayerStats.MovementGunStat;
 import com.example.gtmaddons.stats.PlayerStats.PlayerDetail;
 import com.example.gtmaddons.stats.PlayerStats.RecentFight;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.Font;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -69,7 +69,7 @@ final class StatsOverview {
 	 * Draws the overview at (x, y), w wide. Returns the insight page of the
 	 * card the mouse is on (outlined), or null.
 	 */
-	static Insight draw(DrawContext context, TextRenderer font, PlayerDetail detail, PvpCategory category, boolean individualGuns,
+	static Insight draw(Gfx context, Font font, PlayerDetail detail, PvpCategory category, boolean individualGuns,
 			int x, int y, int w, int mouseX, int mouseY) {
 		// Only rebuilt when the stats, category or individual-guns switch change, not every frame.
 		if (cachedData == null || cachedDetail != detail || cachedCategory != category || cachedIndividual != individualGuns) {
@@ -156,7 +156,7 @@ final class StatsOverview {
 	}
 
 	/** If the mouse is on the card, outlines it and returns its page; otherwise returns current. */
-	private static Insight hover(DrawContext context, Insight insight, int x, int y, int w, int h, int mouseX, int mouseY, Insight current) {
+	private static Insight hover(Gfx context, Insight insight, int x, int y, int w, int h, int mouseX, int mouseY, Insight current) {
 		if (!inside(mouseX, mouseY, x, y, w, h)) return current;
 		context.fill(x, y, x + w, y + 1, Ui.LABEL);
 		context.fill(x, y + h - 1, x + w, y + h, Ui.LABEL);
@@ -167,7 +167,7 @@ final class StatsOverview {
 
 	// ---- Row A ----
 
-	private static void kdCard(DrawContext context, TextRenderer font, Data d, int x, int y, int w, int h) {
+	private static void kdCard(Gfx context, Font font, Data d, int x, int y, int w, int h) {
 		Ui.card(context, font, x, y, w, h, "K/D");
 		if (d.detail.fights() == 0) {
 			ringWithNumber(context, font, x, y, w, h, 0, Ui.TRACK, "-", "no fights");
@@ -179,7 +179,7 @@ final class StatsOverview {
 				String.format("%.2f", kd), d.detail.kills() + "K  " + d.detail.deaths() + "D");
 	}
 
-	private static void ratingCard(DrawContext context, TextRenderer font, Ratings.Result r, PvpCategory category, int x, int y, int w, int h) {
+	private static void ratingCard(Gfx context, Font font, Ratings.Result r, PvpCategory category, int x, int y, int w, int h) {
 		Ui.card(context, font, x, y, w, h, "RATING");
 		Double overall = r.overall();
 		String second = r.movement() != null ? Ratings.secondShort(category) + " " + Math.round(r.movement()) : null;
@@ -191,7 +191,7 @@ final class StatsOverview {
 	}
 
 	/** A ring filling most of the card, with a big number in the middle and a small line under it. */
-	private static void ringWithNumber(DrawContext context, TextRenderer font, int x, int y, int w, int h,
+	private static void ringWithNumber(Gfx context, Font font, int x, int y, int w, int h,
 			double fraction, int color, String number, String sub) {
 		int top = y + 17;
 		int size = Math.min(w - 10, h - 21);
@@ -199,17 +199,17 @@ final class StatsOverview {
 		int thickness = Math.max(2, r / 9);
 		Ui.ring(context, cx, cy, r, thickness, fraction, color);
 		int inner = 2 * (r - thickness) - 8;
-		float scale = Math.max(1f, Math.min(2.6f, inner / (float) Math.max(1, font.getWidth(number))));
+		float scale = Math.max(1f, Math.min(2.6f, inner / (float) Math.max(1, font.width(number))));
 		Ui.bigText(context, font, number, cx, cy - Math.round(5 * scale), scale, bigColor, true);
 		bigColor = Ui.TEXT;
 		if (sub != null && r > 18) {
 			String s = Ui.fit(font, sub, inner);
-			context.drawTextWithShadow(font, s, cx - font.getWidth(s) / 2, cy + Math.round(4 * scale) + 1, Ui.MUTED);
+			context.text(font, s, cx - font.width(s) / 2, cy + Math.round(4 * scale) + 1, Ui.MUTED);
 		}
 	}
 
 	/** The category's breakdown: a big headline stat, then up to four pies with labels. */
-	private static void breakdownCard(DrawContext context, TextRenderer font, Data d, PvpCategory category, int x, int y, int w, int h) {
+	private static void breakdownCard(Gfx context, Font font, Data d, PvpCategory category, int x, int y, int w, int h) {
 		List<Pie> pies = new ArrayList<>();
 		String title, prefix, big, corner = null;
 		int headline = accent;
@@ -260,8 +260,8 @@ final class StatsOverview {
 		}
 		Ui.card(context, font, x, y, w, h, title);
 		// "Swaps 87%" - small gray prefix, big white number.
-		context.drawTextWithShadow(font, prefix, x + 8, y + 26, Ui.LABEL);
-		Ui.bigText(context, font, big, x + 12 + font.getWidth(prefix), y + 20, 2f, headline, false);
+		context.text(font, prefix, x + 8, y + 26, Ui.LABEL);
+		Ui.bigText(context, font, big, x + 12 + font.width(prefix), y + 20, 2f, headline, false);
 		if (corner != null) Ui.textRight(context, font, corner, x + w - 8, y + 26, Ui.LABEL);
 		context.fill(x + 6, y + 42, x + w - 6, y + 43, Ui.CARD_BORDER);
 
@@ -269,18 +269,18 @@ final class StatsOverview {
 	}
 
 	/** Pies side by side across width w from x, each with its label above and value and sub line below. */
-	private static void pies(DrawContext context, TextRenderer font, List<Pie> pies, int x, int y, int w) {
+	private static void pies(Gfx context, Font font, List<Pie> pies, int x, int y, int w) {
 		int slot = w / Math.max(1, pies.size());
 		for (int i = 0; i < pies.size(); i++) {
 			Pie p = pies.get(i);
 			int px = x + slot * i + slot / 2;
 			String label = Ui.fit(font, p.label(), slot - 2);
-			context.drawTextWithShadow(font, label, px - font.getWidth(label) / 2, y + 47, Ui.TEXT);
+			context.text(font, label, px - font.width(label) / 2, y + 47, Ui.TEXT);
 			Ui.pie(context, px, y + 66, 8, Double.isNaN(p.fraction()) ? 0 : p.fraction(), p.color());
 			String value = pct(p.fraction());
-			context.drawTextWithShadow(font, value, px - font.getWidth(value) / 2, y + 76, Ui.TEXT);
+			context.text(font, value, px - font.width(value) / 2, y + 76, Ui.TEXT);
 			String sub = Ui.fit(font, p.sub(), slot - 2);
-			context.drawTextWithShadow(font, sub, px - font.getWidth(sub) / 2, y + 85, Ui.MUTED);
+			context.text(font, sub, px - font.width(sub) / 2, y + 85, Ui.MUTED);
 		}
 	}
 
@@ -289,7 +289,7 @@ final class StatsOverview {
 	 * swap time up top; below, success and mouse efficiency pies beside the
 	 * fastest swap and the total. The step-by-step times are on the card's insight page.
 	 */
-	private static void wingSwapCard(DrawContext context, TextRenderer font, Data d, int x, int y, int w, int h) {
+	private static void wingSwapCard(Gfx context, Font font, Data d, int x, int y, int w, int h) {
 		Ui.card(context, font, x, y, w, h, "SWAPS");
 		int attempts = d.detail.total() - d.detail.cancels();
 		double success = attempts > 0 ? (double) d.detail.successes() / attempts : Double.NaN;
@@ -298,14 +298,14 @@ final class StatsOverview {
 		// "Success 87%" on the left, "Avg 0.412s" on the right; smaller if both don't fit at 2x.
 		String rate = pct(success), time = avg != null ? Format.seconds(avg.totalMs()) : "-";
 		String rateLabel = "Success", timeLabel = "Avg";
-		int labels = font.getWidth(rateLabel) + font.getWidth(timeLabel) + 8 + 16 + 12;
+		int labels = font.width(rateLabel) + font.width(timeLabel) + 8 + 16 + 12;
 		float scale = Ui.bigWidth(font, rate, 2f) + Ui.bigWidth(font, time, 2f) + labels <= w ? 2f : 1.5f;
-		context.drawTextWithShadow(font, rateLabel, x + 8, y + 26, Ui.LABEL);
-		Ui.bigText(context, font, rate, x + 12 + font.getWidth(rateLabel), y + 20, scale, rate(success), false);
+		context.text(font, rateLabel, x + 8, y + 26, Ui.LABEL);
+		Ui.bigText(context, font, rate, x + 12 + font.width(rateLabel), y + 20, scale, rate(success), false);
 		int timeW = Ui.bigWidth(font, time, scale);
 		Ui.bigText(context, font, time, x + w - 8 - timeW, y + 20, scale,
 				avg != null && avg.totalMs() != null ? Ui.scoreColor(com.example.gtmaddons.rating.RatingWeights.swapSpeedScore(avg.totalMs())) : Ui.TEXT, false);
-		context.drawTextWithShadow(font, timeLabel, x + w - 12 - timeW - font.getWidth(timeLabel), y + 26, Ui.LABEL);
+		context.text(font, timeLabel, x + w - 12 - timeW - font.width(timeLabel), y + 26, Ui.LABEL);
 		context.fill(x + 6, y + 42, x + w - 6, y + 43, Ui.CARD_BORDER);
 
 		// Left half: success and mouse efficiency pies.
@@ -321,8 +321,8 @@ final class StatsOverview {
 				{ "TOTAL SWAPS", String.valueOf(d.detail.total()) } };
 		int left = x + 6 + half + 4, right = x + w - 7, ry = y + 48;
 		for (String[] row : rows) {
-			int valueW = font.getWidth(row[1]);
-			context.drawTextWithShadow(font, Ui.fit(font, row[0], right - left - valueW - 4), left, ry, Ui.LABEL);
+			int valueW = font.width(row[1]);
+			context.text(font, Ui.fit(font, row[0], right - left - valueW - 4), left, ry, Ui.LABEL);
 			Ui.textRight(context, font, row[1], right, ry, Ui.TEXT);
 			ry += 11;
 		}
@@ -331,11 +331,11 @@ final class StatsOverview {
 	private record Pie(String label, double fraction, int color, String sub) {}
 
 	/** The last fights as green (kill) and red (death) dots, newest first. The Fights page has the details. */
-	private static void fightsCard(DrawContext context, TextRenderer font, Data d, int x, int y, int w, int h) {
+	private static void fightsCard(Gfx context, Font font, Data d, int x, int y, int w, int h) {
 		Ui.card(context, font, x, y, w, h, "FIGHTS");
 		List<RecentFight> fights = d.detail.recentFights() != null ? d.detail.recentFights() : List.of();
 		if (fights.isEmpty()) {
-			context.drawTextWithShadow(font, "No fights yet", x + 8, y + 40, Ui.MUTED);
+			context.text(font, "No fights yet", x + 8, y + 40, Ui.MUTED);
 			return;
 		}
 		int n = Math.min(10, fights.size());
@@ -348,17 +348,17 @@ final class StatsOverview {
 			int fx = x + 6 + slot * i + slot / 2;
 			Ui.dot(context, fx, line, 4, kill ? Ui.GOOD : Ui.BAD);
 			String letter = kill ? "K" : "D";
-			context.drawTextWithShadow(font, letter, fx - font.getWidth(letter) / 2 + 1, line + 8, kill ? Ui.GOOD : Ui.BAD);
+			context.text(font, letter, fx - font.width(letter) / 2 + 1, line + 8, kill ? Ui.GOOD : Ui.BAD);
 			if (f.opponent() != null) Ui.bigText(context, font, Ui.fit(font, f.opponent(), (int) ((slot - 1) / 0.6f)), fx, line + 19, 0.6f, Ui.MUTED, true);
 		}
 		String summary = String.format("K/D %.2f over %d %s", PlayerScreen.kd(d.detail.kills(), d.detail.deaths()), d.detail.fights(),
 				d.detail.fights() == 1 ? "fight" : "fights");
-		context.drawTextWithShadow(font, summary, x + 8, y + h - 14, Ui.LABEL);
+		context.text(font, summary, x + 8, y + h - 14, Ui.LABEL);
 	}
 
 	// ---- Row B ----
 
-	private static void hitCard(DrawContext context, TextRenderer font, Data d, int x, int y, int w, int h) {
+	private static void hitCard(Gfx context, Font font, Data d, int x, int y, int w, int h) {
 		Ui.card(context, font, x, y, w, h, "HIT RATE");
 		bigColor = Ui.relativeColor(d.shots > 0 ? (double) d.hits / d.shots : Double.NaN, Ui.typicalHitRate(current));
 		iconAndBig(context, font, new ItemStack(Items.TARGET), pct(d.shots > 0 ? (double) d.hits / d.shots : Double.NaN), x, y, w);
@@ -367,7 +367,7 @@ final class StatsOverview {
 				{ "HEADSHOTS", String.valueOf(d.headshots) }, { "KILLS", String.valueOf(d.gunKills) } });
 	}
 
-	private static void headshotCard(DrawContext context, TextRenderer font, Data d, int x, int y, int w, int h) {
+	private static void headshotCard(Gfx context, Font font, Data d, int x, int y, int w, int h) {
 		Ui.card(context, font, x, y, w, h, "HS%");
 		bigColor = Ui.relativeColor(d.hits > 0 ? (double) d.headshots / d.hits : Double.NaN, Ui.typicalHeadshotShare(current));
 		iconAndBig(context, font, new ItemStack(Items.SKELETON_SKULL), pct(d.hits > 0 ? (double) d.headshots / d.hits : Double.NaN), x, y, w);
@@ -380,7 +380,7 @@ final class StatsOverview {
 	 * Momentum (Wing - its swap time is in the SWAPS card), swap time (Air),
 	 * melee combos (JP), or speed after movement gun shots (Ground).
 	 */
-	private static void thirdCard(DrawContext context, TextRenderer font, Data d, PvpCategory category, int x, int y, int w, int h) {
+	private static void thirdCard(Gfx context, Font font, Data d, PvpCategory category, int x, int y, int w, int h) {
 		switch (category) {
 			case WING -> {
 				// Speed kept through Wing swaps into an empty hotbar slot (see SwapRecord).
@@ -441,7 +441,7 @@ final class StatsOverview {
 	}
 
 	/** Melee at a glance on the Air page: how much of the combo fight you win. Click for the Melee page. */
-	private static void meleeCard(DrawContext context, TextRenderer font, Data d, int x, int y, int w, int h) {
+	private static void meleeCard(Gfx context, Font font, Data d, int x, int y, int w, int h) {
 		Ui.card(context, font, x, y, w, h, "MELEE");
 		ComboStat c = d.combos;
 		double kept = c != null && c.ownCombos() > 0 ? 1 - (double) c.ownBroken() / c.ownCombos() : Double.NaN;
@@ -473,24 +473,20 @@ final class StatsOverview {
 		return n > 0 ? new double[] { before / n, after / n } : null;
 	}
 
-	private static String airAvg(List<AirSwapStat> stats, String type) {
-		return stats.stream().filter(a -> type.equals(a.swapType())).findFirst().map(a -> Format.seconds(a.avgMs())).orElse("-");
-	}
-
 	/** Most shots (bars by shot count) or gun HS% (bars by headshot % of hits), top five. */
-	private static void mostShotsCard(DrawContext context, TextRenderer font, List<GunTotal> guns, int x, int y, int w, int h) {
+	private static void mostShotsCard(Gfx context, Font font, List<GunTotal> guns, int x, int y, int w, int h) {
 		Ui.card(context, font, x, y, w, h, "MOST SHOTS");
 		List<GunTotal> rows = mostShotsFirst(guns);
 		if (rows.isEmpty()) {
-			context.drawTextWithShadow(font, "No shots yet", x + 8, y + 24, Ui.MUTED);
+			context.text(font, "No shots yet", x + 8, y + 24, Ui.MUTED);
 			return;
 		}
 		long maxShots = rows.getFirst().shots;
 		int ry = y + 22;
 		for (GunTotal g : rows.subList(0, Math.min(5, rows.size()))) {
 			String value = String.valueOf(g.shots);
-			int valueW = font.getWidth(value);
-			context.drawTextWithShadow(font, Ui.fit(font, g.name, w - 18 - valueW), x + 8, ry, Ui.TEXT);
+			int valueW = font.width(value);
+			context.text(font, Ui.fit(font, g.name, w - 18 - valueW), x + 8, ry, Ui.TEXT);
 			Ui.textRight(context, font, value, x + w - 8, ry, Ui.TEXT);
 			int barW = (int) Math.round((w - 16) * Math.max(0, Math.min(1, (double) g.shots / Math.max(1, maxShots))));
 			context.fill(x + 8, ry + 10, x + 8 + Math.max(1, barW), ry + 12, Ui.BLUE);
@@ -506,16 +502,16 @@ final class StatsOverview {
 	 * (of hits) and kills. On a narrow card, kills and then shots (also in
 	 * MOST SHOTS) are dropped so the names stay readable.
 	 */
-	private static void gunStatsCard(DrawContext context, TextRenderer font, List<GunTotal> guns, int x, int y, int w, int h) {
+	private static void gunStatsCard(Gfx context, Font font, List<GunTotal> guns, int x, int y, int w, int h) {
 		Ui.card(context, font, x, y, w, h, "GUN STATS");
 		List<GunTotal> rows = mostShotsFirst(guns);
 		if (rows.isEmpty()) {
-			context.drawTextWithShadow(font, "No shots yet", x + 8, y + 24, Ui.MUTED);
+			context.text(font, "No shots yet", x + 8, y + 24, Ui.MUTED);
 			return;
 		}
 		// Columns from the right, each as wide as its widest likely value plus a gap.
 		boolean showKills = true, showShots = true;
-		int killsW = font.getWidth("999") + 6, pctW = font.getWidth("100%") + 6, shotsW = font.getWidth("99999") + 6;
+		int killsW = font.width("999") + 6, pctW = font.width("100%") + 6, shotsW = font.width("99999") + 6;
 		int left = x + 7, right = x + w - 7;
 		if (right - left - 2 * pctW - killsW - shotsW < MIN_NAME_W) showKills = false;
 		if (right - left - 2 * pctW - shotsW < MIN_NAME_W) showShots = false;
@@ -529,7 +525,7 @@ final class StatsOverview {
 		if (showKills) Ui.textRight(context, font, "K", right, ry, Ui.MUTED);
 		ry += 12;
 		for (GunTotal g : rows.subList(0, Math.min(5, rows.size()))) {
-			context.drawTextWithShadow(font, Ui.fit(font, g.name, nameW), left, ry, Ui.TEXT);
+			context.text(font, Ui.fit(font, g.name, nameW), left, ry, Ui.TEXT);
 			if (showShots) Ui.textRight(context, font, String.valueOf(g.shots), shotsRight, ry, Ui.TEXT);
 			Ui.textRight(context, font, pct(g.shots > 0 ? (double) g.hits / g.shots : Double.NaN), hitRight, ry,
 					Ui.relativeColor(g.shots > 0 ? (double) g.hits / g.shots : Double.NaN, Ui.typicalHitRate(current)));
@@ -547,21 +543,21 @@ final class StatsOverview {
 	}
 
 	/** An item icon with a big value beside it, like csstats' trophy + "58%". */
-	private static void iconAndBig(DrawContext context, TextRenderer font, ItemStack icon, String value, int x, int y, int w) {
-		context.drawItem(icon, x + 6, y + 20);
-		float scale = Math.min(2f, (w - 32) / (float) Math.max(1, font.getWidth(value)));
+	private static void iconAndBig(Gfx context, Font font, ItemStack icon, String value, int x, int y, int w) {
+		context.item(icon, x + 6, y + 20);
+		float scale = Math.min(2f, (w - 32) / (float) Math.max(1, font.width(value)));
 		Ui.bigText(context, font, value, x + 26, y + 22, Math.max(1f, scale), bigColor, false);
 		bigColor = Ui.TEXT;
 		context.fill(x + 6, y + 42, x + w - 6, y + 43, Ui.CARD_BORDER);
 	}
 
 	/** Bold label on the left, value on the right, like csstats' PLAYED / WON / LOST. */
-	private static void rows(DrawContext context, TextRenderer font, int x, int y, int w, String[][] rows) {
+	private static void rows(Gfx context, Font font, int x, int y, int w, String[][] rows) {
 		int ry = y + 50;
 		for (String[] row : rows) {
-			int valueW = font.getWidth(row[1]);
+			int valueW = font.width(row[1]);
 			String label = Ui.fit(font, row[0], w - 18 - valueW);
-			context.drawTextWithShadow(font, Text.literal(label).formatted(Formatting.BOLD), x + 7, ry, Ui.TEXT);
+			context.text(font, Component.literal(label).withStyle(ChatFormatting.BOLD), x + 7, ry, Ui.TEXT);
 			Ui.textRight(context, font, row[1], x + w - 7, ry, Ui.TEXT);
 			ry += 13;
 		}

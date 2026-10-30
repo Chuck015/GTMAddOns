@@ -1,7 +1,8 @@
 package com.example.gtmaddons;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.ingame.InventoryScreen;
+import com.example.gtmaddons.compat.Mc;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 
 /**
  * The "Hide recipes" setting: in the survival inventory the recipe book still opens and closes as normal, but while it is open its panel
@@ -19,6 +20,6 @@ public final class RecipeBookHider {
 
 	/** True while the survival inventory is the open screen and the setting is on: the recipe book's contents are hidden. */
 	public static boolean hides() {
-		return settings != null && settings.hideRecipeBook && MinecraftClient.getInstance().currentScreen instanceof InventoryScreen;
+		return settings != null && settings.hideRecipeBook && Mc.screen(Minecraft.getInstance()) instanceof InventoryScreen;
 	}
 }

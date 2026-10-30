@@ -2,14 +2,14 @@ package com.example.gtmaddons.gun;
 
 import com.example.gtmaddons.BoostAngleHud;
 import com.example.gtmaddons.PvpCategory;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayDeque;
 import java.util.LinkedHashSet;
@@ -121,30 +121,30 @@ final class MovementDebugger {
 			lastPickupNanos = now;
 		} else if (id.equals(BOOST_ARROW) && lastPickupNanos >= 0 && now - lastPickupNanos <= BOOST_PAIR_NANOS) {
 			lastPickupNanos = -1L; // the boost trail repeats the arrow sound; only the pair is a start
-			onBoostStart(MinecraftClient.getInstance(), now);
+			onBoostStart(Minecraft.getInstance(), now);
 		}
 	}
 
-	void onFrame(MinecraftClient client) {
-		ClientPlayerEntity player = client.player;
+	void onFrame(Minecraft client) {
+		LocalPlayer player = client.player;
 		if (player == null) return;
 		long now = System.nanoTime();
-		ItemStack chest = player.getInventory().getStack(PvpCategory.CHEST_INVENTORY_INDEX);
+		ItemStack chest = player.getInventory().getItem(PvpCategory.CHEST_INVENTORY_INDEX);
 
 		boolean boostOn = log.wants(DevFilter.WING_BOOST);
 		boolean jetpackOn = log.wants(DevFilter.JETPACK);
 
 		// Wing boost: shift while gliding
-		if (player.isGliding()) lookHistory.addLast(new LookSample(now, player.getPitch()));
+		if (player.isFallFlying()) lookHistory.addLast(new LookSample(now, player.getXRot()));
 		while (!lookHistory.isEmpty() && now - lookHistory.peekFirst().nanos() > LOOK_HISTORY_NANOS) lookHistory.removeFirst();
 
 		if (!boostOn) pressNanos = -1L;
 		if (pressNanos >= 0 && now - pressNanos > BOOST_SOUND_NANOS) onNoBoost(player);
-		boolean sneakDown = client.options.sneakKey.isPressed();
-		if (boostOn && sneakDown && !sneakWasDown && player.isGliding()) {
+		boolean sneakDown = client.options.keyShift.isDown();
+		if (boostOn && sneakDown && !sneakWasDown && player.isFallFlying()) {
 			if (pressNanos >= 0) onNoBoost(player);
 			pressNanos = now;
-			pressPitch = player.getPitch();
+			pressPitch = player.getXRot();
 			pressY = player.getY();
 			pressGround = groundBelow(client, player);
 			pressMotion = motion(player);
@@ -155,13 +155,13 @@ final class MovementDebugger {
 		sneakWasDown = sneakDown;
 
 		// Jetpack: double-tap jump while wearing one
-		boolean jumpDown = client.options.jumpKey.isPressed();
+		boolean jumpDown = client.options.keyJump.isDown();
 		if (!jetpackOn) watchStartNanos = -1L;
 		if (jetpackOn && jumpDown && !jumpWasDown) {
 			boolean doubleTap = lastJumpPressNanos >= 0 && now - lastJumpPressNanos <= DOUBLE_TAP_NANOS;
 			if (doubleTap && PvpCategory.isWornJetpack(chest) && watchStartNanos < 0) {
 				tapGapMs = (now - lastJumpPressNanos) / 1_000_000L;
-				secondPressOnGround = player.isOnGround();
+				secondPressOnGround = player.onGround();
 				watchStartNanos = now;
 				nextSampleNanos = now;
 				sawFlying = false;
@@ -170,7 +170,7 @@ final class MovementDebugger {
 				jetpackSounds.clear();
 				log.openWindow(client);
 				log.add(String.format("JETPACK DOUBLE-TAP (%dms apart)  %s  onGround=%s  wearing=\"%s\"",
-						tapGapMs, motion(player), player.isOnGround(), name(chest)));
+						tapGapMs, motion(player), player.onGround(), name(chest)));
 				lastJumpPressNanos = -1L; // a third press starts a new double-tap
 			} else {
 				lastJumpPressNanos = now;
@@ -181,9 +181,9 @@ final class MovementDebugger {
 		if (watchStartNanos >= 0) watchJetpackStart(client, player, now);
 	}
 
-	private void watchJetpackStart(MinecraftClient client, ClientPlayerEntity player, long now) {
+	private void watchJetpackStart(Minecraft client, LocalPlayer player, long now) {
 		long elapsed = now - watchStartNanos;
-		double ySpeed = player.getVelocity().y;
+		double ySpeed = player.getDeltaMovement().y;
 		peakRise = Math.max(peakRise, ySpeed);
 		if (player.getAbilities().flying) sawFlying = true;
 		if (elapsed >= RISING_CHECK_NANOS && ySpeed > STILL_RISING) stillRising = true;
@@ -209,7 +209,7 @@ final class MovementDebugger {
 			log.add(String.format("JETPACK START %s  (double-tap %dms apart; %s; peak y-speed %+.1f b/s; sounds: %s)",
 					ok ? "OK" : "FAILED", tapGapMs, why, peakRise * 20, sounds));
 			DevLogger.chat(String.format("Jetpack start %s | %dms double-tap | %s | peak y-speed %+.1f b/s | sounds: %s",
-					ok ? "OK" : "FAILED", tapGapMs, why, peakRise * 20, sounds), ok ? Formatting.GRAY : Formatting.RED);
+					ok ? "OK" : "FAILED", tapGapMs, why, peakRise * 20, sounds), ok ? ChatFormatting.GRAY : ChatFormatting.RED);
 		}
 	}
 
@@ -217,18 +217,18 @@ final class MovementDebugger {
 		return sounds.isEmpty() ? "none" : String.join(", ", sounds);
 	}
 
-	private static String motion(ClientPlayerEntity player) {
-		Vec3d v = player.getVelocity();
+	private static String motion(LocalPlayer player) {
+		Vec3 v = player.getDeltaMovement();
 		// Velocity is blocks per tick; x20 for blocks per second.
 		return String.format("speed %.1f b/s, y-speed %+.1f b/s%s",
-				Math.hypot(v.x, v.z) * 20, v.y * 20, player.isGliding() ? ", gliding" : "");
+				Math.hypot(v.x, v.z) * 20, v.y * 20, player.isFallFlying() ? ", gliding" : "");
 	}
 
 	// ---- Wing boost results ----
 
 	/** The boost start sounds arrived: judge it by the press, or by holding shift. */
-	private void onBoostStart(MinecraftClient client, long now) {
-		ClientPlayerEntity player = client.player;
+	private void onBoostStart(Minecraft client, long now) {
+		LocalPlayer player = client.player;
 		if (player == null) return;
 		String how;
 		float pitch;
@@ -239,7 +239,7 @@ final class MovementDebugger {
 		double y, ground;
 		if (pressNanos >= 0) {
 			pitch = pressPitch;
-			highestPitch = Math.min(pressPitch, highestPitchSince(pressNanos, player.getPitch()));
+			highestPitch = Math.min(pressPitch, highestPitchSince(pressNanos, player.getXRot()));
 			y = pressY;
 			ground = pressGround;
 			how = String.format("at shift press, %dms to boost, highest %s in between",
@@ -247,14 +247,14 @@ final class MovementDebugger {
 			pressNanos = -1L;
 		} else if (sneakWasDown) {
 			int ping = Math.max(0, ShotTracker.ping(client));
-			pitch = pitchAt(now - ping * 1_000_000L, player.getPitch());
+			pitch = pitchAt(now - ping * 1_000_000L, player.getXRot());
 			highestPitch = pitch;
 			y = player.getY();
 			ground = groundBelow(client, player);
 			how = String.format("holding shift, angle ~%dms ago (ping)", ping);
 		} else {
 			log.openWindow(client);
-			log.add("WING BOOST started without shift  " + look(player.getPitch()) + "  " + height(player.getY(), groundBelow(client, player))
+			log.add("WING BOOST started without shift  " + look(player.getXRot()) + "  " + height(player.getY(), groundBelow(client, player))
 					+ "  " + motion(player));
 			return;
 		}
@@ -269,7 +269,7 @@ final class MovementDebugger {
 		log.add(String.format("WING BOOST OK (%s)  %s  %s  (%s)  %s  height limit: %s",
 				expected, look(pitch), height(y, ground), how, motion(player), heightLimit()));
 		DevLogger.chat(String.format("Wing boost OK (%s) | %s | %s | %s | limit: %s", expected, look(pitch), how, height(y, ground), heightLimit()),
-				Formatting.GREEN);
+				ChatFormatting.GREEN);
 	}
 
 	/**
@@ -278,20 +278,20 @@ final class MovementDebugger {
 	 * and it counts toward the height limit. Right after a boost it doesn't,
 	 * in case GTM has a cooldown.
 	 */
-	private void onNoBoost(ClientPlayerEntity player) {
+	private void onNoBoost(LocalPlayer player) {
 		pressNanos = -1L;
 		String why;
-		Formatting color;
+		ChatFormatting color;
 		long sinceBoost = lastBoostNanos >= 0 ? (System.nanoTime() - lastBoostNanos) / 1_000_000L : -1L;
 		if (!angleOk(pressPitch)) {
 			why = "as expected - angle too low";
-			color = Formatting.GRAY;
+			color = ChatFormatting.GRAY;
 		} else if (sinceBoost >= 0 && sinceBoost < RECENT_BOOST_NANOS / 1_000_000L) {
 			why = String.format("angle OK but only %dms after a boost (cooldown?), not counted for height", sinceBoost);
-			color = Formatting.GOLD;
+			color = ChatFormatting.GOLD;
 		} else {
 			why = "angle OK, should have boosted";
-			color = Formatting.RED;
+			color = ChatFormatting.RED;
 			lowestFailY = Math.min(lowestFailY, pressY);
 			if (!Double.isNaN(pressGround)) lowestFailGround = Math.min(lowestFailGround, pressGround);
 		}
@@ -325,13 +325,13 @@ final class MovementDebugger {
 	}
 
 	/** Blocks straight down to the ground (water counts), or NaN if there's none in the world. */
-	private static double groundBelow(MinecraftClient client, ClientPlayerEntity player) {
-		if (client.world == null) return Double.NaN;
-		Vec3d feet = new Vec3d(player.getX(), player.getY(), player.getZ());
-		Vec3d bottom = new Vec3d(feet.x, client.world.getBottomY() - 1, feet.z);
-		BlockHitResult hit = client.world.raycast(new RaycastContext(
-				feet, bottom, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.ANY, player));
-		return hit.getType() == HitResult.Type.MISS ? Double.NaN : feet.y - hit.getPos().y;
+	private static double groundBelow(Minecraft client, LocalPlayer player) {
+		if (client.level == null) return Double.NaN;
+		Vec3 feet = new Vec3(player.getX(), player.getY(), player.getZ());
+		Vec3 bottom = new Vec3(feet.x, client.level.getMinY() - 1, feet.z);
+		BlockHitResult hit = client.level.clip(new ClipContext(
+				feet, bottom, ClipContext.Block.COLLIDER, ClipContext.Fluid.ANY, player));
+		return hit.getType() == HitResult.Type.MISS ? Double.NaN : feet.y - hit.getLocation().y;
 	}
 
 	private static String height(double y, double ground) {
@@ -370,6 +370,6 @@ final class MovementDebugger {
 	}
 
 	private static String name(ItemStack stack) {
-		return stack.isEmpty() ? "-" : stack.getName().getString();
+		return stack.isEmpty() ? "-" : stack.getHoverName().getString();
 	}
 }

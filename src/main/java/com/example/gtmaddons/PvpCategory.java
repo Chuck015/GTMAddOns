@@ -1,11 +1,11 @@
 package com.example.gtmaddons;
 
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.EquippableComponent;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.equipment.Equippable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,7 +30,7 @@ public enum PvpCategory {
 	JP("JP"),
 	AIR("Air");
 
-	public static final int CHEST_INVENTORY_INDEX = EquipmentSlot.CHEST.getOffsetEntitySlotId(PlayerInventory.MAIN_SIZE);
+	public static final int CHEST_INVENTORY_INDEX = EquipmentSlot.CHEST.getIndex(Inventory.INVENTORY_SIZE);
 	private static final int HOTBAR_SIZE = 9;
 
 	public final String label;
@@ -44,13 +44,13 @@ public enum PvpCategory {
 	 * started count (see CombatTracker) - one picked up from a kill mid-fight
 	 * can't change your category.
 	 */
-	public static PvpCategory classify(PlayerEntity player) {
-		PlayerInventory inventory = player.getInventory();
-		ItemStack chest = inventory.getStack(CHEST_INVENTORY_INDEX);
+	public static PvpCategory classify(Player player) {
+		Inventory inventory = player.getInventory();
+		ItemStack chest = inventory.getItem(CHEST_INVENTORY_INDEX);
 
 		boolean hasJetpack = isWornJetpack(chest), hasWingsuit = false, jetpackInHotbar = false, wingsuitInHotbar = false;
-		for (int i = 0; i < inventory.size(); i++) {
-			ItemStack stack = inventory.getStack(i);
+		for (int i = 0; i < inventory.getContainerSize(); i++) {
+			ItemStack stack = inventory.getItem(i);
 			if (isJetpack(stack)) {
 				hasJetpack = true;
 				if (i < HOTBAR_SIZE) jetpackInHotbar = true;
@@ -78,19 +78,19 @@ public enum PvpCategory {
 	 * wingsuit found and where, e.g. jetpack "Jetpack" (hotbar 3),
 	 * wingsuit "Wingsuit" (worn), and whether a combat tag is limiting them.
 	 */
-	public static String explain(PlayerEntity player) {
-		PlayerInventory inventory = player.getInventory();
+	public static String explain(Player player) {
+		Inventory inventory = player.getInventory();
 		List<String> found = new ArrayList<>();
-		for (int i = 0; i < inventory.size(); i++) {
-			ItemStack stack = inventory.getStack(i);
+		for (int i = 0; i < inventory.getContainerSize(); i++) {
+			ItemStack stack = inventory.getItem(i);
 			boolean worn = i == CHEST_INVENTORY_INDEX;
 			String kind = isJetpack(stack) || (worn && isWornJetpack(stack)) ? "jetpack"
 					: isWingsuit(stack) ? "wingsuit"
 					: hasJetpackName(stack) ? "ignored (named jetpack but not wearable)" : null;
 			if (kind == null) continue;
 			String where = i == CHEST_INVENTORY_INDEX ? "worn" : i < HOTBAR_SIZE ? "hotbar " + (i + 1)
-					: i < PlayerInventory.MAIN_SIZE ? "inventory" : "slot " + i;
-			found.add(kind + " \"" + stack.getName().getString() + "\" (" + where + ")");
+					: i < Inventory.INVENTORY_SIZE ? "inventory" : "slot " + i;
+			found.add(kind + " \"" + stack.getHoverName().getString() + "\" (" + where + ")");
 		}
 		CombatTracker combat = CombatTracker.INSTANCE;
 		String tag = combat.isTagged()
@@ -117,8 +117,8 @@ public enum PvpCategory {
 	 */
 	public static boolean isJetpack(ItemStack stack) {
 		if (!hasJetpackName(stack)) return false;
-		EquippableComponent equippable = stack.get(DataComponentTypes.EQUIPPABLE);
-		return (equippable != null && equippable.slot() == EquipmentSlot.CHEST) || stack.contains(DataComponentTypes.GLIDER);
+		Equippable equippable = stack.get(DataComponents.EQUIPPABLE);
+		return (equippable != null && equippable.slot() == EquipmentSlot.CHEST) || stack.has(DataComponents.GLIDER);
 	}
 
 	/** The item in your chest slot is a jetpack if it's named like one. */
@@ -129,7 +129,7 @@ public enum PvpCategory {
 	/** "Jetpack" in the name - but not "Jetpack Fuel", which every GTM player always carries. */
 	private static boolean hasJetpackName(ItemStack stack) {
 		if (stack.isEmpty()) return false;
-		String name = stack.getName().getString().toLowerCase(Locale.ROOT);
+		String name = stack.getHoverName().getString().toLowerCase(Locale.ROOT);
 		return name.contains("jetpack") && !name.contains("fuel");
 	}
 
@@ -139,6 +139,6 @@ public enum PvpCategory {
 	 * the server builds those on gliding items too.
 	 */
 	public static boolean isWingsuit(ItemStack stack) {
-		return !stack.isEmpty() && stack.contains(DataComponentTypes.GLIDER) && !isJetpack(stack);
+		return !stack.isEmpty() && stack.has(DataComponents.GLIDER) && !isJetpack(stack);
 	}
 }

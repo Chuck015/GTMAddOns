@@ -1,10 +1,10 @@
 package com.example.gtmaddons.gun;
 
-import net.minecraft.text.ClickEvent;
-import net.minecraft.text.HoverEvent;
-import net.minecraft.text.Style;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.Style;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -48,14 +48,14 @@ final class NearLogger {
 		if (startNanos >= 0) finish(); // a new /near before the last one finished
 		command = "/" + sent.trim();
 		// Before the capture starts - it's a chat message too, and isn't part of the reply.
-		DevLogger.chat("Capturing the reply to " + command, Formatting.GRAY);
+		DevLogger.chat("Capturing the reply to " + command, ChatFormatting.GRAY);
 		startNanos = System.nanoTime();
 		endNanos = startNanos + FIRST_REPLY_NANOS;
 		messages = 0;
 		lines.clear();
 	}
 
-	void onMessage(Text text, boolean actionBar) {
+	void onMessage(Component text, boolean actionBar) {
 		if (startNanos < 0) return;
 		long now = System.nanoTime();
 		messages++;
@@ -74,12 +74,12 @@ final class NearLogger {
 		if (messages == 0) lines.add("(no reply within " + FIRST_REPLY_NANOS / 1_000_000_000L + "s)");
 		log.writeBlock(command + " reply", lines);
 		DevLogger.chat(String.format("%s reply: %d %s captured over %dms%s", command, messages, messages == 1 ? "message" : "messages",
-				tookMs, log.isSavingLog() ? ", saved to the dev log" : " (QA mode - not saved)"), Formatting.GRAY);
+				tookMs, log.isSavingLog() ? ", saved to the dev log" : " (QA mode - not saved)"), ChatFormatting.GRAY);
 		lines.clear();
 	}
 
 	/** The message's text, with anything outside printable ASCII written as \\uXXXX. */
-	private static String plain(Text text) {
+	private static String plain(Component text) {
 		StringBuilder out = new StringBuilder("\"");
 		text.visit((Style style, String part) -> {
 			for (int i = 0; i < part.length(); ) {
@@ -94,7 +94,7 @@ final class NearLogger {
 	}
 
 	/** Hover text and click actions on parts of the message, each once. */
-	private static List<String> attached(Text text) {
+	private static List<String> attached(Component text) {
 		Set<String> found = new LinkedHashSet<>();
 		text.visit((Style style, String part) -> {
 			String on = part.isBlank() ? "" : " on \"" + part.strip() + "\"";

@@ -6,16 +6,26 @@
     "ClientPlayNetworkHandlerMixin",
     "DroppedItemLabelMixin",
     "ItemEntityRenderStateMixin",
+    "EntityLookMixin",
     "HandledScreenAccessor",
+    "InventoryBackgroundMixin",
+    "InventoryTransparencyMixin",
+    "ItemStackGlintMixin",
     "InGameHudMixin",
+    "KeyClickMixin",
+    "KeyMappingAccessor",
     "LivingEntityInvoker",
+    "LivingEntityRendererInvoker",
     "MinecraftClientMixin",
     "NameTagMixin",
     "PlayerSneakAnimationMixin",
+    "PlayerFishHeadMixin",
     "PlayerListHudMixin",
+    "PlayerModelFishHeadMixin",
     "RecipeBookMixin",
     "SoundSystemMixin",
-    "SpriteContentsMixin"
+    "SpriteContentsMixin",
+    "SwapClickPacketMixin"
   ],
   "injectors": {
     "defaultRequire": 1

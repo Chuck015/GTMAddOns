@@ -1,6 +1,17 @@
 package com.example.gtmaddons.gui;
 
 import com.example.gtmaddons.PvpCategory;
+import com.example.gtmaddons.compat.Gfx;
+import com.example.gtmaddons.compat.Mc;
+import com.example.gtmaddons.compat.ModScreen;
+import com.example.gtmaddons.gui.Panels.Gap;
+import com.example.gtmaddons.gui.Panels.Meter;
+import com.example.gtmaddons.gui.Panels.Note;
+import com.example.gtmaddons.gui.Panels.Row;
+import com.example.gtmaddons.gui.Panels.Section;
+import com.example.gtmaddons.gui.Panels.Stat;
+import com.example.gtmaddons.gui.Panels.TableRow;
+import com.example.gtmaddons.gui.Panels.TimeRow;
 import com.example.gtmaddons.gun.GunType;
 import com.example.gtmaddons.rating.RatingWeights;
 import com.example.gtmaddons.rating.Ratings;
@@ -12,19 +23,10 @@ import com.example.gtmaddons.stats.PlayerStats.MovementGunStat;
 import com.example.gtmaddons.stats.PlayerStats.PlayerDetail;
 import com.example.gtmaddons.stats.PlayerStats.RecentFight;
 import com.example.gtmaddons.stats.PlayerStats.RecentSwap;
-import com.example.gtmaddons.gui.Panels.Gap;
-import com.example.gtmaddons.gui.Panels.Meter;
-import com.example.gtmaddons.gui.Panels.Note;
-import com.example.gtmaddons.gui.Panels.Row;
-import com.example.gtmaddons.gui.Panels.Section;
-import com.example.gtmaddons.gui.Panels.Stat;
-import com.example.gtmaddons.gui.Panels.TableRow;
-import com.example.gtmaddons.gui.Panels.TimeRow;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.screen.ScreenTexts;
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -41,7 +43,7 @@ import java.util.Map;
  * The pages show numbers and labels only, with no explanatory text. Closes
  * itself if you get combat-tagged.
  */
-public class InsightScreen extends Screen {
+public class InsightScreen extends ModScreen {
 
 	/** The insight pages, and which PvP categories have each. */
 	public enum Insight {
@@ -77,15 +79,15 @@ public class InsightScreen extends Screen {
 	private final Screen parent;
 	private final PlayerDetail detail;
 	private final PvpCategory category;
-	private final Text subtitle;
+	private final Component subtitle;
 	private final boolean individualGuns;
 	private Insight insight;
 	private List<Section> left = List.of(), right = List.of();
 	private int scroll = 0;
 
 	/** subtitle is the stats page's (which fights these are, and the K/D). */
-	public InsightScreen(Screen parent, PlayerDetail detail, PvpCategory category, Insight insight, Text subtitle, boolean individualGuns) {
-		super(Text.literal(detail.name() + " · " + category.label + " PvP"));
+	public InsightScreen(Screen parent, PlayerDetail detail, PvpCategory category, Insight insight, Component subtitle, boolean individualGuns) {
+		super(Component.literal(detail.name() + " · " + category.label + " PvP"));
 		this.parent = parent;
 		this.detail = detail;
 		this.category = category;
@@ -96,7 +98,7 @@ public class InsightScreen extends Screen {
 
 	@Override
 	public void tick() {
-		CombatLock.closeIfInCombat(client);
+		CombatLock.closeIfInCombat(minecraft);
 	}
 
 	@Override
@@ -105,15 +107,15 @@ public class InsightScreen extends Screen {
 		int tabsLeft = tabsLeft(pages.size());
 		for (int i = 0; i < pages.size(); i++) {
 			Insight page = pages.get(i);
-			ButtonWidget tab = addDrawableChild(ButtonWidget.builder(Text.literal(page.label), b -> {
+			Button tab = addRenderableWidget(ThemedButton.create(Component.literal(page.label), b -> {
 				insight = page;
 				scroll = 0;
-				clearAndInit();
-			}).dimensions(tabsLeft + i * (TAB_WIDTH + TAB_GAP), TABS_Y, TAB_WIDTH, 20).build());
+				rebuildWidgets();
+			}).bounds(tabsLeft + i * (TAB_WIDTH + TAB_GAP), TABS_Y, TAB_WIDTH, 20).build());
 			tab.active = page != insight;
 		}
-		addDrawableChild(ButtonWidget.builder(ScreenTexts.BACK, b -> close())
-				.dimensions(width / 2 - 75, height - 28, 150, 20).build());
+		addRenderableWidget(ThemedButton.create(CommonComponents.GUI_BACK, b -> onClose())
+				.bounds(width / 2 - 75, height - 28, 150, 20).build());
 		build();
 	}
 
@@ -122,19 +124,19 @@ public class InsightScreen extends Screen {
 	}
 
 	@Override
-	public void close() {
-		client.setScreen(parent);
+	public void onClose() {
+		Mc.setScreen(minecraft, parent);
 	}
 
 	// ---- Drawing ----
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
+	public void draw(Gfx context, int mouseX, int mouseY, float deltaTicks) {
 		context.fill(0, 0, width, height, Ui.PAGE);
-		super.render(context, mouseX, mouseY, deltaTicks);
+		super.draw(context, mouseX, mouseY, deltaTicks);
 		int accent = Ui.accent(category);
-		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 8, Ui.TEXT);
-		context.drawCenteredTextWithShadow(textRenderer, subtitle, width / 2, 19, Ui.MUTED);
+		context.centeredText(font, title, width / 2, 8, Ui.TEXT);
+		context.centeredText(font, subtitle, width / 2, 19, Ui.MUTED);
 
 		List<Insight> pages = Insight.of(category);
 		int tabX = tabsLeft(pages.size()) + pages.indexOf(insight) * (TAB_WIDTH + TAB_GAP);
@@ -155,11 +157,11 @@ public class InsightScreen extends Screen {
 		}
 
 		context.enableScissor(0, top, width, bottom);
-		var matrices = context.getMatrices();
+		var matrices = context.pose();
 		matrices.pushMatrix();
 		matrices.translate(0, -scroll);
-		Panels.drawColumn(context, textRenderer, leftX, top, columnW, left, accent);
-		if (!right.isEmpty()) Panels.drawColumn(context, textRenderer, rightX, top, columnW, right, accent);
+		Panels.drawColumn(context, font, leftX, top, columnW, left, accent);
+		if (!right.isEmpty()) Panels.drawColumn(context, font, rightX, top, columnW, right, accent);
 		matrices.popMatrix();
 		context.disableScissor();
 
@@ -207,8 +209,8 @@ public class InsightScreen extends Screen {
 		ratings.add(ratingRow(Ratings.secondLabel(category), r.movement()));
 		ratings.add(ratingRow("Overall", r.overall()));
 		if (r.skill() != null || r.performance() != null) {
-			ratings.add(ratingRow("Mechanics", r.skill()));
-			ratings.add(ratingRow("Results", r.performance()));
+			ratings.add(ratingRow("Skill", r.skill()));
+			ratings.add(ratingRow("Performance", r.performance()));
 		}
 		left.add(new Section(category.label + " ratings (beta)", ratings));
 

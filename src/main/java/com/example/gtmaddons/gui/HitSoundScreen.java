@@ -1,16 +1,16 @@
 package com.example.gtmaddons.gui;
 
 import com.example.gtmaddons.GTMAddOnsClient;
-import com.example.gtmaddons.HitSounds;
 import com.example.gtmaddons.HitSounds.Kind;
+import com.example.gtmaddons.HitSounds;
 import com.example.gtmaddons.Settings;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.SliderWidget;
-import net.minecraft.screen.ScreenTexts;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import com.example.gtmaddons.compat.Gfx;
+import com.example.gtmaddons.compat.Mc;
+import com.example.gtmaddons.compat.ModScreen;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 
 /**
  * Settings > Hit sound: turn hit sounds on, then pick a sound for each kind of hit - headshot, body
@@ -26,7 +26,7 @@ import net.minecraft.util.Formatting;
  *            [ Pitch: 1.00   ]
  *            [    Back    ]
  */
-public class HitSoundScreen extends Screen {
+public class HitSoundScreen extends ModScreen {
 
 	private static final int ROW = 24;
 	private static final int BUTTON_WIDTH = 200;
@@ -41,7 +41,7 @@ public class HitSoundScreen extends Screen {
 	private final Settings settings;
 
 	public HitSoundScreen(Screen parent, GTMAddOnsClient mod) {
-		super(Text.literal("GTMAddOns - Hit sound"));
+		super(Component.literal("GTMAddOns - Hit sound"));
 		this.parent = parent;
 		this.settings = mod.settings();
 	}
@@ -60,11 +60,11 @@ public class HitSoundScreen extends Screen {
 		int y = top();
 		int third = (BUTTON_WIDTH - 2 * GAP) / 3;
 
-		addDrawableChild(ButtonWidget.builder(onOff("Hit sound", settings.hitSound), b -> {
+		addRenderableWidget(ThemedButton.create(onOff("Hit sound", settings.hitSound), b -> {
 			settings.hitSound = !settings.hitSound;
 			settings.save();
 			b.setMessage(onOff("Hit sound", settings.hitSound));
-		}).dimensions(x, y, BUTTON_WIDTH, 20)
+		}).bounds(x, y, BUTTON_WIDTH, 20)
 				.build());
 		y += ROW;
 
@@ -72,42 +72,42 @@ public class HitSoundScreen extends Screen {
 		Kind[] kinds = Kind.values();
 		for (int i = 0; i < kinds.length; i++) {
 			Kind kind = kinds[i];
-			Text label = kind == selected ? Text.literal(kind.label).formatted(Formatting.YELLOW) : Text.literal(kind.label);
-			addDrawableChild(ButtonWidget.builder(label, b -> {
+			Component label = kind == selected ? Component.literal(kind.label).withStyle(ChatFormatting.YELLOW) : Component.literal(kind.label);
+			addRenderableWidget(ThemedButton.create(label, b -> {
 				selected = kind;
-				clearAndInit();
-			}).dimensions(x + i * (third + GAP), y, third, 20).build());
+				rebuildWidgets();
+			}).bounds(x + i * (third + GAP), y, third, 20).build());
 		}
 		y += ROW;
 
-		addDrawableChild(ButtonWidget.builder(onOff(selected.label + " sound", HitSounds.INSTANCE.enabledOf(selected)), b -> {
+		addRenderableWidget(ThemedButton.create(onOff(selected.label + " sound", HitSounds.INSTANCE.enabledOf(selected)), b -> {
 			HitSounds.INSTANCE.setEnabled(selected, !HitSounds.INSTANCE.enabledOf(selected));
 			settings.save();
 			b.setMessage(onOff(selected.label + " sound", HitSounds.INSTANCE.enabledOf(selected)));
-		}).dimensions(x, y, BUTTON_WIDTH, 20).build());
+		}).bounds(x, y, BUTTON_WIDTH, 20).build());
 		y += ROW;
 
 		// Sound: previous, name (click to hear it), next.
-		addDrawableChild(ButtonWidget.builder(Text.literal("<"), b -> stepSound(-1))
-				.dimensions(x, y, ARROW_WIDTH, 20).build());
-		addDrawableChild(ButtonWidget.builder(soundName(), b -> preview())
-				.dimensions(x + ARROW_WIDTH + GAP, y, BUTTON_WIDTH - 2 * (ARROW_WIDTH + GAP), 20)
+		addRenderableWidget(ThemedButton.create(Component.literal("<"), b -> stepSound(-1))
+				.bounds(x, y, ARROW_WIDTH, 20).build());
+		addRenderableWidget(ThemedButton.create(soundName(), b -> preview())
+				.bounds(x + ARROW_WIDTH + GAP, y, BUTTON_WIDTH - 2 * (ARROW_WIDTH + GAP), 20)
 				.build());
-		addDrawableChild(ButtonWidget.builder(Text.literal(">"), b -> stepSound(1))
-				.dimensions(x + BUTTON_WIDTH - ARROW_WIDTH, y, ARROW_WIDTH, 20).build());
+		addRenderableWidget(ThemedButton.create(Component.literal(">"), b -> stepSound(1))
+				.bounds(x + BUTTON_WIDTH - ARROW_WIDTH, y, ARROW_WIDTH, 20).build());
 		y += ROW;
 
-		addDrawableChild(new VolumeSlider(x, y));
+		addRenderableWidget(new VolumeSlider(x, y));
 		y += ROW;
-		addDrawableChild(new PitchSlider(x, y));
+		addRenderableWidget(new PitchSlider(x, y));
 		y += ROW + 8;
 
-		addDrawableChild(ButtonWidget.builder(ScreenTexts.BACK, b -> close())
-				.dimensions(x, y, BUTTON_WIDTH, 20).build());
+		addRenderableWidget(ThemedButton.create(CommonComponents.GUI_BACK, b -> onClose())
+				.bounds(x, y, BUTTON_WIDTH, 20).build());
 	}
 
-	private Text soundName() {
-		return Text.literal(HitSounds.CHOICES.get(HitSounds.INSTANCE.selectedIndex(selected)).label());
+	private Component soundName() {
+		return Component.literal(HitSounds.CHOICES.get(HitSounds.INSTANCE.selectedIndex(selected)).label());
 	}
 
 	private void stepSound(int delta) {
@@ -116,53 +116,56 @@ public class HitSoundScreen extends Screen {
 		HitSounds.INSTANCE.setId(selected, HitSounds.CHOICES.get(next).id());
 		settings.save();
 		preview();
-		clearAndInit();
+		rebuildWidgets();
 	}
 
 	private void preview() {
 		HitSounds.play(HitSounds.INSTANCE.idOf(selected), HitSounds.INSTANCE.volumeOf(selected), HitSounds.INSTANCE.pitchOf(selected));
 	}
 
-	private static Text onOff(String label, boolean on) {
-		return Text.literal(label + ": ").append(Text.literal(on ? "ON" : "OFF").formatted(on ? Formatting.GREEN : Formatting.RED));
+	private static Component onOff(String label, boolean on) {
+		return Component.literal(label + ": ").append(Component.literal(on ? "ON" : "OFF").withStyle(on ? ChatFormatting.GREEN : ChatFormatting.RED));
 	}
 
 	@Override
-	public void close() {
-		client.setScreen(parent);
+	public void onClose() {
+		Mc.setScreen(minecraft, parent);
 	}
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
-		super.render(context, mouseX, mouseY, deltaTicks);
+	public void draw(Gfx context, int mouseX, int mouseY, float deltaTicks) {
+		context.fill(0, 0, width, height, Ui.PAGE);
+		super.draw(context, mouseX, mouseY, deltaTicks);
 		int top = top();
-		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, top - 22, Ui.TEXT);
+		context.centeredText(font, title, width / 2, top - 22, Ui.TEXT);
 	}
 
-	/** 0-200% volume for the open tab, saved as it's dragged. */
-	private final class VolumeSlider extends SliderWidget {
+	/** 0-500% volume for the open tab, saved as it's dragged. */
+	private final class VolumeSlider extends ThemedSlider {
 		VolumeSlider(int x, int y) {
-			super(x, y, BUTTON_WIDTH, 20, Text.empty(), HitSounds.INSTANCE.volumeOf(selected) / HitSounds.MAX_VOLUME);
+			super(x, y, BUTTON_WIDTH, 20, Component.empty(), HitSounds.INSTANCE.volumeOf(selected) / HitSounds.MAX_VOLUME);
 			updateMessage();
 		}
 
 		@Override
 		protected void updateMessage() {
 			int percent = (int) Math.round(value * 100 * HitSounds.MAX_VOLUME);
-			setMessage(Text.literal(percent == 0 ? "Volume: Muted" : "Volume: " + percent + "%"));
+			setMessage(Component.literal(percent == 0 ? "Volume: Muted" : "Volume: " + percent + "%"));
 		}
 
 		@Override
 		protected void applyValue() {
-			HitSounds.INSTANCE.setVolume(selected, (float) value * HitSounds.MAX_VOLUME);
+			float volume = (float) value * HitSounds.MAX_VOLUME;
+			// Close to 100% sits exactly on 100% (the default).
+			HitSounds.INSTANCE.setVolume(selected, Math.abs(volume - 1.0f) < 0.03f ? 1.0f : volume);
 			settings.save();
 		}
 	}
 
 	/** Pitch 0.5-2.0 for the open tab, saved as it's dragged. */
-	private final class PitchSlider extends SliderWidget {
+	private final class PitchSlider extends ThemedSlider {
 		PitchSlider(int x, int y) {
-			super(x, y, BUTTON_WIDTH, 20, Text.empty(), (HitSounds.INSTANCE.pitchOf(selected) - PITCH_MIN) / (PITCH_MAX - PITCH_MIN));
+			super(x, y, BUTTON_WIDTH, 20, Component.empty(), (HitSounds.INSTANCE.pitchOf(selected) - PITCH_MIN) / (PITCH_MAX - PITCH_MIN));
 			updateMessage();
 		}
 
@@ -172,7 +175,7 @@ public class HitSoundScreen extends Screen {
 
 		@Override
 		protected void updateMessage() {
-			setMessage(Text.literal(String.format("Pitch: %.2f", pitch())));
+			setMessage(Component.literal(String.format("Pitch: %.2f", pitch())));
 		}
 
 		@Override

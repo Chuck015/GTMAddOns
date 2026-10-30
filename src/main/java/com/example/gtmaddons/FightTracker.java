@@ -4,10 +4,10 @@ import com.example.gtmaddons.gun.DevFilter;
 import com.example.gtmaddons.gun.DevLogger;
 import com.example.gtmaddons.gun.ShotResult;
 import com.example.gtmaddons.stats.SwapRecord;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -85,7 +85,7 @@ public final class FightTracker {
 	public record Fight(String key, long startedAt, long endedAt, String outcome, String opponent, PvpCategory category,
 			List<SwapRecord> swaps, List<ShotResult> shots, List<ComboTracker.ComboResult> combos,
 			String opponentCategory, String opponentGear, MovementInputTracker.Stats movementInput, String opponentTrack,
-			boolean netEnded) {}
+			boolean netEnded, MouseTracker.Stats mouseInput) {}
 
 	private static final class Current {
 		final long startedAt = System.currentTimeMillis();
@@ -111,8 +111,11 @@ public final class FightTracker {
 		final GearTracker.OpponentGear gear;
 		/** The movement keys over the fight (MovementInputTracker). */
 		final MovementInputTracker.Stats movement;
+		/** How the mouse moved over the fight (MouseTracker). */
+		final MouseTracker.Stats mouse;
 
-		Closing(Current fight, String outcome, String opponent, long endedAt, long nanos, GearTracker.OpponentGear gear, MovementInputTracker.Stats movement) {
+		Closing(Current fight, String outcome, String opponent, long endedAt, long nanos, GearTracker.OpponentGear gear, MovementInputTracker.Stats movement, MouseTracker.Stats mouse) {
+			this.mouse = mouse;
 			this.gear = gear;
 			this.movement = movement;
 			this.fight = fight;
@@ -199,16 +202,16 @@ public final class FightTracker {
 
 	// ---- Start and end ----
 
-	public void onFrame(MinecraftClient client) {
+	public void onFrame(Minecraft client) {
 		long nowNanos = System.nanoTime();
 		while (!closing.isEmpty() && nowNanos - closing.get(0).nanos >= CLOSE_GRACE_NANOS) finish(closing.remove(0));
-		ClientPlayerEntity player = client.player;
+		LocalPlayer player = client.player;
 		// WASTED with no subtitle in time: still a death, just no killer name.
 		if (deathTitleNanos >= 0 && System.nanoTime() - deathTitleNanos > SUBTITLE_WAIT_NANOS) {
 			deathTitleNanos = -1L;
 			if (current != null) end("DEATH", null);
 		}
-		if (current != null && player != null && player.isDead()) end("DEATH", null);
+		if (current != null && player != null && player.isDeadOrDying()) end("DEATH", null);
 
 		boolean tagged = CombatTracker.INSTANCE.isTagged();
 		if (tagged && !wasTagged && current == null) start();
@@ -222,11 +225,11 @@ public final class FightTracker {
 	 * Titles. "WASTED" is GTM's death screen - the surest sign you died, with
 	 * the killer in the subtitle that follows (see onSubtitle).
 	 */
-	public void onTitle(Text text) {
+	public void onTitle(Component text) {
 		if (text.getString().trim().equalsIgnoreCase(DEATH_TITLE)) deathTitleNanos = System.nanoTime();
 	}
 
-	public void onSubtitle(Text text) {
+	public void onSubtitle(Component text) {
 		if (deathTitleNanos < 0) return;
 		deathTitleNanos = -1L;
 		if (current == null) return;
@@ -236,7 +239,7 @@ public final class FightTracker {
 	}
 
 	/** Chat messages (not the action bar). */
-	public void onMessage(Text text) {
+	public void onMessage(Component text) {
 		if (current == null) return;
 		String message = text.getString();
 
@@ -281,7 +284,7 @@ public final class FightTracker {
 	}
 
 	private void start() {
-		ClientPlayerEntity player = MinecraftClient.getInstance().player;
+		LocalPlayer player = Minecraft.getInstance().player;
 		PvpCategory category = player != null ? PvpCategory.classify(player) : PvpCategory.GROUND;
 		current = new Current(category);
 		// The swaps from just before the first hit belong to this fight.
@@ -292,12 +295,13 @@ public final class FightTracker {
 		recentShots.clear();
 		GearTracker.INSTANCE.onFightStart();
 		MovementInputTracker.INSTANCE.onFightStart();
-		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Fight started (" + category.label + ") - recording stats" + (before > 0 ? " (+" + before + " swap" + (before == 1 ? "" : "s") + " from the 10 s before)" : ""), Formatting.YELLOW);
+		MouseTracker.INSTANCE.onFightStart();
+		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Fight started (" + category.label + ") - recording stats" + (before > 0 ? " (+" + before + " swap" + (before == 1 ? "" : "s") + " from the 10 s before)" : ""), ChatFormatting.YELLOW);
 	}
 
 	private void end(String outcome, String opponent) {
 		beforeFightEnds.run();
-		closing.add(new Closing(current, outcome, opponent, System.currentTimeMillis(), System.nanoTime(), GearTracker.INSTANCE.onFightEnd(opponent), MovementInputTracker.INSTANCE.onFightEnd()));
+		closing.add(new Closing(current, outcome, opponent, System.currentTimeMillis(), System.nanoTime(), GearTracker.INSTANCE.onFightEnd(opponent), MovementInputTracker.INSTANCE.onFightEnd(), MouseTracker.INSTANCE.onFightEnd()));
 		current = null;
 	}
 
@@ -308,12 +312,12 @@ public final class FightTracker {
 		Fight done = new Fight(UUID.randomUUID().toString().replace("-", ""), fight.startedAt, c.endedAt,
 				outcome, opponent, fight.category, List.copyOf(fight.swaps), List.copyOf(fight.shots), List.copyOf(fight.combos),
 				c.gear != null ? c.gear.category() : null, c.gear != null ? c.gear.json() : null, c.movement,
-				c.gear != null ? c.gear.trackJson() : null, fight.netEnded);
+				c.gear != null ? c.gear.trackJson() : null, fight.netEnded, c.mouse);
 		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) {
 			DevLogger.chat(String.format("Fight recorded (%s): %s%s | %.0fs | %d swaps, %d shots, %d combos",
 					done.category().label, outcome.equals("KILL") ? "kill" : "death", opponent != null ? (outcome.equals("KILL") ? " on " : " by ") + opponent : "",
 					(done.endedAt() - done.startedAt()) / 1000.0, done.swaps().size(), done.shots().size(), done.combos().size()),
-					Formatting.GREEN);
+					ChatFormatting.GREEN);
 		}
 		if (c.movement != null) DevLogger.INSTANCE.fightMovement(c.movement.describe(), c.movement.toJson().toString());
 		if (c.gear != null) DevLogger.INSTANCE.fightGear(opponent, c.gear.describe(), c.gear.json(), c.gear.trackJson());
@@ -343,12 +347,13 @@ public final class FightTracker {
 		current = null;
 		GearTracker.INSTANCE.onFightDrop();
 		MovementInputTracker.INSTANCE.onFightDrop();
-		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Fight dropped, nothing recorded: " + reason, Formatting.GRAY);
+		MouseTracker.INSTANCE.onFightDrop();
+		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Fight dropped, nothing recorded: " + reason, ChatFormatting.GRAY);
 	}
 
 	static String myName() {
-		MinecraftClient client = MinecraftClient.getInstance();
+		Minecraft client = Minecraft.getInstance();
 		if (client.player != null) return client.player.getName().getString();
-		return client.getSession() != null ? client.getSession().getUsername() : null;
+		return client.getUser() != null ? client.getUser().getName() : null;
 	}
 }

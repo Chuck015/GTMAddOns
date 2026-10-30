@@ -1,8 +1,8 @@
 package com.example.gtmaddons.gui;
 
 import com.example.gtmaddons.PvpCategory;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
+import com.example.gtmaddons.compat.Gfx;
+import net.minecraft.client.gui.Font;
 
 /** Shared look for the stats screens: panels, bars and colors. All colors are ARGB. */
 final class Ui {
@@ -28,7 +28,7 @@ final class Ui {
 	}
 
 	/** A dark panel with a thin border and an accent strip along the top. */
-	static void panel(DrawContext context, int x, int y, int w, int h, int accent) {
+	static void panel(Gfx context, int x, int y, int w, int h, int accent) {
 		context.fill(x, y, x + w, y + h, CARD);
 		context.fill(x, y, x + w, y + 1, CARD_BORDER);
 		context.fill(x, y + h - 1, x + w, y + h, CARD_BORDER);
@@ -38,23 +38,23 @@ final class Ui {
 	}
 
 	/** A thin progress bar; fraction is clamped to 0-1. */
-	static void bar(DrawContext context, int x, int y, int w, int h, double fraction, int color) {
+	static void bar(Gfx context, int x, int y, int w, int h, double fraction, int color) {
 		context.fill(x, y, x + w, y + h, BAR_TRACK);
 		int filled = (int) Math.round(w * Math.max(0.0, Math.min(1.0, fraction)));
 		if (filled > 0) context.fill(x, y, x + filled, y + h, color);
 	}
 
-	static void textRight(DrawContext context, TextRenderer font, String text, int right, int y, int color) {
-		context.drawTextWithShadow(font, text, right - font.getWidth(text), y, color);
+	static void textRight(Gfx context, Font font, String text, int right, int y, int color) {
+		context.text(font, text, right - font.width(text), y, color);
 	}
 
 	/** Word-wraps text to lines no wider than width (a single long word stays on its own line). */
-	static java.util.List<String> wrap(TextRenderer font, String text, int width) {
+	static java.util.List<String> wrap(Font font, String text, int width) {
 		java.util.List<String> lines = new java.util.ArrayList<>();
 		StringBuilder line = new StringBuilder();
 		for (String word : text.split(" ")) {
 			String tryLine = line.length() == 0 ? word : line + " " + word;
-			if (line.length() > 0 && font.getWidth(tryLine) > width) {
+			if (line.length() > 0 && font.width(tryLine) > width) {
 				lines.add(line.toString());
 				line = new StringBuilder(word);
 			} else {
@@ -66,11 +66,11 @@ final class Ui {
 	}
 
 	/** Cuts a line into pieces no wider than width (at any character, so long unbroken text such as JSON fits too). */
-	static java.util.List<String> chunks(TextRenderer font, String text, int width) {
+	static java.util.List<String> chunks(Font font, String text, int width) {
 		java.util.List<String> out = new java.util.ArrayList<>();
 		String rest = text;
 		while (!rest.isEmpty()) {
-			String head = font.trimToWidth(rest, Math.max(1, width));
+			String head = font.plainSubstrByWidth(rest, Math.max(1, width));
 			if (head.isEmpty()) head = rest.substring(0, 1);
 			out.add(head);
 			rest = rest.substring(head.length());
@@ -80,10 +80,10 @@ final class Ui {
 	}
 
 	/** Cuts text to fit width, ending in "..." if it had to. */
-	static String fit(TextRenderer font, String text, int width) {
-		if (font.getWidth(text) <= width) return text;
+	static String fit(Font font, String text, int width) {
+		if (font.width(text) <= width) return text;
 		String dots = "...";
-		return font.trimToWidth(text, Math.max(0, width - font.getWidth(dots))) + dots;
+		return font.plainSubstrByWidth(text, Math.max(0, width - font.width(dots))) + dots;
 	}
 
 	/**
@@ -121,11 +121,6 @@ final class Ui {
 		return Double.isNaN(value) || typical <= 0 ? TEXT : gradient(value / typical / 2.0);
 	}
 
-	/** Color for a swap time: green at the best time the ratings use, red at the worst. */
-	static int swapTimeColor(double ms, double bestMs, double worstMs) {
-		return scoreColor(Math.max(0.0, Math.min(100.0, 100.0 * (worstMs - ms) / (worstMs - bestMs))));
-	}
-
 	/** Green / yellow / red for a success-style percentage. */
 	static int rateColor(double percent) {
 		return percent >= 75 ? GOOD : percent >= 50 ? OK : BAD;
@@ -145,46 +140,46 @@ final class Ui {
 	static int cardAccent = 0;
 
 	/** A flat dark card with a thin border, an accent strip along the top, and its title in bold caps in the accent. */
-	static void card(DrawContext context, TextRenderer font, int x, int y, int w, int h, String title) {
+	static void card(Gfx context, Font font, int x, int y, int w, int h, String title) {
 		context.fill(x, y, x + w, y + h, CARD);
 		context.fill(x, y, x + w, y + 1, CARD_BORDER);
 		context.fill(x, y + h - 1, x + w, y + h, CARD_BORDER);
 		context.fill(x, y, x + 1, y + h, CARD_BORDER);
 		context.fill(x + w - 1, y, x + w, y + h, CARD_BORDER);
 		if (cardAccent != 0) context.fill(x, y, x + w, y + 2, cardAccent);
-		context.drawTextWithShadow(font, net.minecraft.text.Text.literal(title).formatted(net.minecraft.util.Formatting.BOLD), x + 6, y + 6, cardAccent != 0 ? cardAccent : TEXT);
+		context.text(font, net.minecraft.network.chat.Component.literal(title).withStyle(net.minecraft.ChatFormatting.BOLD), x + 6, y + 6, cardAccent != 0 ? cardAccent : TEXT);
 	}
 
 	/** Text drawn scale times bigger; x is its left edge, or its center if centered. */
-	static void bigText(DrawContext context, TextRenderer font, String text, int x, int y, float scale, int color, boolean centered) {
-		var matrices = context.getMatrices();
+	static void bigText(Gfx context, Font font, String text, int x, int y, float scale, int color, boolean centered) {
+		var matrices = context.pose();
 		matrices.pushMatrix();
 		matrices.translate(x, y);
 		matrices.scale(scale, scale);
-		context.drawTextWithShadow(font, text, centered ? -font.getWidth(text) / 2 : 0, 0, color);
+		context.text(font, text, centered ? -font.width(text) / 2 : 0, 0, color);
 		matrices.popMatrix();
 	}
 
 	/** How wide text is at a scale. */
-	static int bigWidth(TextRenderer font, String text, float scale) {
-		return Math.round(font.getWidth(text) * scale);
+	static int bigWidth(Font font, String text, float scale) {
+		return Math.round(font.width(text) * scale);
 	}
 
 	/**
 	 * A ring gauge centered on (cx, cy): the first fraction of it (clockwise
 	 * from the top) in color, the rest in the track color.
 	 */
-	static void ring(DrawContext context, int cx, int cy, int radius, int thickness, double fraction, int color) {
+	static void ring(Gfx context, int cx, int cy, int radius, int thickness, double fraction, int color) {
 		arc(context, cx, cy, radius, radius - thickness, fraction, color, TRACK);
 	}
 
 	/** A small pie chart: fraction of it (clockwise from the top) in color. */
-	static void pie(DrawContext context, int cx, int cy, int radius, double fraction, int color) {
+	static void pie(Gfx context, int cx, int cy, int radius, double fraction, int color) {
 		arc(context, cx, cy, radius, -1, fraction, color, TRACK);
 	}
 
 	/** A filled dot. */
-	static void dot(DrawContext context, int cx, int cy, int radius, int color) {
+	static void dot(Gfx context, int cx, int cy, int radius, int color) {
 		arc(context, cx, cy, radius, -1, 1.0, color, color);
 	}
 
@@ -192,7 +187,7 @@ final class Ui {
 	 * Draws the pixels between two radii, colored by angle - one fill per
 	 * run of same-colored pixels in a row, so rings stay cheap to draw.
 	 */
-	private static void arc(DrawContext context, int cx, int cy, int outer, int inner, double fraction, int color, int track) {
+	private static void arc(Gfx context, int cx, int cy, int outer, int inner, double fraction, int color, int track) {
 		double f = Math.max(0.0, Math.min(1.0, fraction));
 		for (int dy = -outer; dy < outer; dy++) {
 			int runStart = 0, runColor = 0;

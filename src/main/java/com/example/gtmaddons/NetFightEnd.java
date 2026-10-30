@@ -3,13 +3,13 @@ package com.example.gtmaddons;
 import com.example.gtmaddons.gun.DevFilter;
 import com.example.gtmaddons.gun.DevLogger;
 import com.example.gtmaddons.gun.ShotTracker;
-import net.minecraft.block.Blocks;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.math.BlockPos;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.block.Blocks;
 
 /**
  * Nets almost always mean a kill, so a player caught in a Net Launcher net often gives up: nobody kills, and the two just
@@ -59,7 +59,7 @@ public final class NetFightEnd {
 	/** You landed a Net Launcher hit on a wingsuit player (ShotTracker, a moment after the shot). */
 	public void onNetHit(String target, long shotMillis) {
 		if (active) return;
-		ClientPlayerEntity player = MinecraftClient.getInstance().player;
+		LocalPlayer player = Minecraft.getInstance().player;
 		if (player == null) return;
 		if (!FightTracker.INSTANCE.inFight()) {
 			waitingTarget = target;
@@ -72,13 +72,13 @@ public final class NetFightEnd {
 
 	/** Damage to an entity, with whoever caused it (from the damage packet). */
 	public void onDamage(Entity target, int causeId) {
-		MinecraftClient client = MinecraftClient.getInstance();
-		ClientPlayerEntity me = client.player;
+		Minecraft client = Minecraft.getInstance();
+		LocalPlayer me = client.player;
 		if (me == null || target == null) return;
 		long now = System.currentTimeMillis();
 		if (target.getId() == me.getId()) {
-			Entity cause = causeId >= 0 && client.world != null ? client.world.getEntityById(causeId) : null;
-			if (!(cause instanceof PlayerEntity) || cause.getId() == me.getId()) return;
+			Entity cause = causeId >= 0 && client.level != null ? client.level.getEntity(causeId) : null;
+			if (!(cause instanceof Player) || cause.getId() == me.getId()) return;
 			if (active && youWereNetted && now - startMillis <= NET_TICK_MILLIS) return; // the net's own tick
 			lastPlayerDamageMillis = now;
 			lastPlayerDamageName = cause.getName().getString();
@@ -92,9 +92,9 @@ public final class NetFightEnd {
 		}
 	}
 
-	public void onFrame(MinecraftClient client) {
-		ClientPlayerEntity player = client.player;
-		if (player == null || client.world == null || !FightTracker.INSTANCE.inFight()) {
+	public void onFrame(Minecraft client) {
+		LocalPlayer player = client.player;
+		if (player == null || client.level == null || !FightTracker.INSTANCE.inFight()) {
 			active = false;
 			return;
 		}
@@ -107,7 +107,7 @@ public final class NetFightEnd {
 			if (lastPlayerDamageName != null && now - lastPlayerDamageMillis <= DAMAGE_THEN_WEB_MILLIS
 					&& ShotTracker.isOnWingsuit(player) && inWeb(client, player)) {
 				float health = Float.NaN;
-				for (PlayerEntity p : client.world.getPlayers()) {
+				for (Player p : client.level.players()) {
 					if (p.getName().getString().equalsIgnoreCase(lastPlayerDamageName)) health = p.getHealth();
 				}
 				start(true, lastPlayerDamageName, now, health);
@@ -139,12 +139,12 @@ public final class NetFightEnd {
 		log(String.format("net %s %s (netter health %s)", netted ? "from" : "on", otherName, Float.isNaN(netterHp) ? "unknown" : String.format("%.1f hearts", netterHp / 2.0f)));
 	}
 
-	private static boolean inWeb(MinecraftClient client, ClientPlayerEntity player) {
-		BlockPos feet = player.getBlockPos();
-		return client.world.getBlockState(feet).isOf(Blocks.COBWEB) || client.world.getBlockState(feet.up()).isOf(Blocks.COBWEB);
+	private static boolean inWeb(Minecraft client, LocalPlayer player) {
+		BlockPos feet = player.blockPosition();
+		return client.level.getBlockState(feet).is(Blocks.COBWEB) || client.level.getBlockState(feet.above()).is(Blocks.COBWEB);
 	}
 
 	private static void log(String message) {
-		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("[Net] " + message, Formatting.GOLD);
+		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("[Net] " + message, ChatFormatting.GOLD);
 	}
 }

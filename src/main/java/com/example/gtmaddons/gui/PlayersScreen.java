@@ -3,23 +3,25 @@ package com.example.gtmaddons.gui;
 import com.example.gtmaddons.AdminMode;
 import com.example.gtmaddons.GTMAddOnsClient;
 import com.example.gtmaddons.PvpCategory;
+import com.example.gtmaddons.compat.Gfx;
+import com.example.gtmaddons.compat.Mc;
+import com.example.gtmaddons.compat.ModScreen;
 import com.example.gtmaddons.rating.Ratings;
-import com.example.gtmaddons.stats.FightFilter;
 import com.example.gtmaddons.stats.FightFilter.Opponent;
+import com.example.gtmaddons.stats.FightFilter;
 import com.example.gtmaddons.stats.Leaderboard;
 import com.example.gtmaddons.stats.PlayerStats.LeaderboardData;
 import com.example.gtmaddons.stats.PlayerStats.OpponentCount;
 import com.example.gtmaddons.stats.PlayerStats.PlayerDetail;
 import com.example.gtmaddons.stats.StatsClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.ConfirmScreen;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.ClickableWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.screen.ScreenTexts;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -42,9 +44,7 @@ import java.util.Set;
  * In Admin mode every row also has a red X that deletes all of that player's stats
  * data from the server (after a confirmation) - for when someone has boosted.
  */
-public class PlayersScreen extends Screen {
-
-	public static final int DEFAULT_FIGHTS = 25;
+public class PlayersScreen extends ModScreen {
 	/** The quick views, as on a player's page. */
 	/** Everyone is rated over their newest this many fights (all that are stored) unless Filter... picks another number. */
 	private static final int FIGHTS = FightFilter.MAX_FIGHTS;
@@ -68,7 +68,7 @@ public class PlayersScreen extends Screen {
 	private List<Leaderboard.Entry> ranked = List.of();
 	private String search = "";
 	/** The row buttons and the pager, rebuilt on their own when the search changes (so the search box keeps its focus). */
-	private final List<ClickableWidget> rowWidgets = new ArrayList<>();
+	private final List<AbstractWidget> rowWidgets = new ArrayList<>();
 	/** How many fights everyone is rated over: FIGHTS, or -1 while a custom filter is on. */
 	private int viewFights;
 	private FightFilter filter = null;
@@ -87,7 +87,7 @@ public class PlayersScreen extends Screen {
 
 	/** parent is where Back returns to (e.g. the main menu), or null to close. `first` is already loaded. */
 	public PlayersScreen(Screen parent, StatsClient stats, GTMAddOnsClient mod, PvpCategory category, LeaderboardData first) {
-		super(Text.literal("GTMAddOns - Player Stats"));
+		super(Component.literal("GTMAddOns - Player Stats"));
 		this.parent = parent;
 		this.stats = stats;
 		this.mod = mod;
@@ -113,8 +113,8 @@ public class PlayersScreen extends Screen {
 
 	private String sortLabel(Leaderboard.Sort s) {
 		return switch (s) {
-			case PERFORMANCE -> "Results";
-			case SKILL -> "Mechanics";
+			case PERFORMANCE -> "Performance";
+			case SKILL -> "Skill";
 			case OVERALL -> "Overall";
 			case AIM -> Ratings.aimLabel(category);
 			case MOVEMENT -> Ratings.secondLabel(category);
@@ -153,13 +153,13 @@ public class PlayersScreen extends Screen {
 	}
 
 	@Override
-	public void close() {
-		client.setScreen(parent);
+	public void onClose() {
+		Mc.setScreen(minecraft, parent);
 	}
 
 	@Override
 	public void tick() {
-		CombatLock.closeIfInCombat(client);
+		CombatLock.closeIfInCombat(minecraft);
 		if (stale) {
 			stale = false;
 			cache.clear();
@@ -189,16 +189,16 @@ public class PlayersScreen extends Screen {
 		if (cached != null) {
 			setBoard(cached);
 			status = null;
-			clearAndInit();
+			rebuildWidgets();
 			return;
 		}
 		board = null;
 		entries = List.of();
 		ranked = List.of();
 		status = "Loading the " + category.label + " leaderboard...";
-		clearAndInit();
+		rebuildWidgets();
 		PvpCategory asked = category;
-		stats.fetchLeaderboard(asked, effectiveFights(), filter != null ? filter.opponents() : Set.of()).whenComplete((result, error) -> client.execute(() -> {
+		stats.fetchLeaderboard(asked, effectiveFights(), filter != null ? filter.opponents() : Set.of()).whenComplete((result, error) -> minecraft.execute(() -> {
 			// A newer pick replaced this one while it loaded.
 			if (!wanted.equals(requestKey())) return;
 			if (error != null) {
@@ -209,7 +209,7 @@ public class PlayersScreen extends Screen {
 				setBoard(result);
 				status = null;
 			}
-			clearAndInit();
+			rebuildWidgets();
 		}));
 	}
 
@@ -224,7 +224,7 @@ public class PlayersScreen extends Screen {
 	private void selectSort(Leaderboard.Sort picked) {
 		sort = picked;
 		if (board != null) setBoard(board);
-		clearAndInit();
+		rebuildWidgets();
 	}
 
 	private void openFilter() {
@@ -232,7 +232,7 @@ public class PlayersScreen extends Screen {
 		List<Opponent> opponents = new ArrayList<>();
 		for (OpponentCount o : board.opponents()) opponents.add(new Opponent(o.key(), o.name(), o.fights(), o.fights()));
 		FightFilter current = filter != null ? filter : FightFilter.last(viewFights);
-		client.setScreen(new FightFilterScreen(this, category.label, opponents, current, null, picked -> {
+		Mc.setScreen(minecraft, new FightFilterScreen(this, category.label, opponents, current, null, picked -> {
 			// Everyone's newest 500 is the plain view, not a filter.
 			boolean plain = !picked.hasOpponents() && picked.limit() == FIGHTS;
 			filter = plain ? null : picked;
@@ -257,8 +257,8 @@ public class PlayersScreen extends Screen {
 		PvpCategory[] categories = PvpCategory.values();
 		for (int i = 0; i < categories.length; i++) {
 			PvpCategory tab = categories[i];
-			ButtonWidget button = addDrawableChild(ButtonWidget.builder(Text.literal(tab.label), b -> selectTab(tab))
-					.dimensions(tabsLeft() + i * (TAB_WIDTH + TAB_GAP), TABS_Y, TAB_WIDTH, 20).build());
+			Button button = addRenderableWidget(ThemedButton.create(Component.literal(tab.label), b -> selectTab(tab))
+					.bounds(tabsLeft() + i * (TAB_WIDTH + TAB_GAP), TABS_Y, TAB_WIDTH, 20).build());
 			button.active = tab != category;
 		}
 
@@ -270,22 +270,22 @@ public class PlayersScreen extends Screen {
 		int x = (width - rowWidth) / 2;
 		for (int i = 0; i < sorts.size(); i++) {
 			Leaderboard.Sort option = sorts.get(i);
-			ButtonWidget view = addDrawableChild(ButtonWidget.builder(Text.literal(sortLabel(option)), b -> selectSort(option))
-					.dimensions(x + i * (viewWidth + gap), VIEWS_Y, viewWidth, 20)
+			Button view = addRenderableWidget(ThemedButton.create(Component.literal(sortLabel(option)), b -> selectSort(option))
+					.bounds(x + i * (viewWidth + gap), VIEWS_Y, viewWidth, 20)
 					.build());
 			view.active = sort() != option;
 		}
-		ButtonWidget filterButton = addDrawableChild(ButtonWidget.builder(Text.literal(filter != null ? "Filter: ON" : "Filter..."), b -> openFilter())
-				.dimensions(x + rowWidth - filterWidth, VIEWS_Y, filterWidth, 20)
+		Button filterButton = addRenderableWidget(ThemedButton.create(Component.literal(filter != null ? "Filter: ON" : "Filter..."), b -> openFilter())
+				.bounds(x + rowWidth - filterWidth, VIEWS_Y, filterWidth, 20)
 				.build());
 		filterButton.active = board != null;
 
 		// Search by name: the list narrows as you type.
-		TextFieldWidget field = addDrawableChild(new TextFieldWidget(textRenderer, 4, 4, 110, 16, Text.literal("Search players")));
+		EditBox field = addRenderableWidget(new EditBox(font, 4, 4, 110, 16, Component.literal("Search players")));
 		field.setMaxLength(16);
-		field.setPlaceholder(Text.literal("Search player...").formatted(Formatting.GRAY));
-		field.setText(search);
-		field.setChangedListener(text -> {
+		field.setHint(Component.literal("Search player...").withStyle(ChatFormatting.GRAY));
+		field.setValue(search);
+		field.setResponder(text -> {
 			search = text.trim().toLowerCase(Locale.ROOT);
 			applySearch();
 			page = 0;
@@ -294,17 +294,17 @@ public class PlayersScreen extends Screen {
 
 		int bottom = height - 28;
 		if (AdminMode.isOn() && mod != null) {
-			addDrawableChild(ButtonWidget.builder(Text.literal("Flags..."), b -> client.setScreen(new AdminFlaggedScreen(this, mod)))
-					.dimensions(width - 62, 4, 58, 16).build());
+			addRenderableWidget(ThemedButton.create(Component.literal("Stat flags..."), b -> Mc.setScreen(minecraft, new AdminFlaggedScreen(this, mod)))
+					.bounds(width - 86, 4, 82, 16).build());
 		}
-		addDrawableChild(ButtonWidget.builder(parent != null ? ScreenTexts.BACK : ScreenTexts.DONE, b -> close())
-				.dimensions(width / 2 - 75, bottom, 150, 20).build());
+		addRenderableWidget(ThemedButton.create(parent != null ? CommonComponents.GUI_BACK : CommonComponents.GUI_DONE, b -> onClose())
+				.bounds(width / 2 - 75, bottom, 150, 20).build());
 		buildRows();
 	}
 
 	/** The row buttons for this page and the pager under them. */
 	private void buildRows() {
-		for (ClickableWidget widget : rowWidgets) remove(widget);
+		for (AbstractWidget widget : rowWidgets) removeWidget(widget);
 		rowWidgets.clear();
 		// Each row is a blank button (for the click and hover); render() draws the columns on top of it.
 		int left = (width - rowWidth()) / 2;
@@ -314,23 +314,23 @@ public class PlayersScreen extends Screen {
 		for (int i = start; i < end; i++) {
 			Leaderboard.Entry entry = entries.get(i);
 			int y = TABLE_TOP + (i - start) * ROW_HEIGHT;
-			rowWidgets.add(addDrawableChild(ButtonWidget.builder(Text.empty(), b -> openPlayer(entry.detail()))
-					.dimensions(left, y, rowWidth() - (admin ? DELETE_WIDTH + 2 : 0), 20)
-					.narrationSupplier(narration -> Text.literal(entry.detail().name()))
+			rowWidgets.add(addRenderableWidget(ThemedButton.create(Component.empty(), b -> openPlayer(entry.detail()))
+					.bounds(left, y, rowWidth() - (admin ? DELETE_WIDTH + 2 : 0), 20)
+					.createNarration(narration -> Component.literal(entry.detail().name()))
 					.build()));
 			if (admin) {
-				rowWidgets.add(addDrawableChild(ButtonWidget.builder(Text.literal("✖").formatted(Formatting.RED), b -> confirmDelete(entry.detail()))
-						.dimensions(left + rowWidth() - DELETE_WIDTH, y, DELETE_WIDTH, 20)
+				rowWidgets.add(addRenderableWidget(ThemedButton.create(Component.literal("✖").withStyle(ChatFormatting.RED), b -> confirmDelete(entry.detail()))
+						.bounds(left + rowWidth() - DELETE_WIDTH, y, DELETE_WIDTH, 20)
 						.build()));
 			}
 		}
 
 		int bottom = height - 28;
-		ButtonWidget prev = addDrawableChild(ButtonWidget.builder(Text.literal("< Prev"), b -> changePage(-1))
-				.dimensions(width / 2 - 155, bottom, 70, 20).build());
+		Button prev = addRenderableWidget(ThemedButton.create(Component.literal("< Prev"), b -> changePage(-1))
+				.bounds(width / 2 - 155, bottom, 70, 20).build());
 		prev.active = page > 0;
-		ButtonWidget next = addDrawableChild(ButtonWidget.builder(Text.literal("Next >"), b -> changePage(1))
-				.dimensions(width / 2 + 85, bottom, 70, 20).build());
+		Button next = addRenderableWidget(ThemedButton.create(Component.literal("Next >"), b -> changePage(1))
+				.bounds(width / 2 + 85, bottom, 70, 20).build());
 		next.active = end < entries.size();
 		rowWidgets.add(prev);
 		rowWidgets.add(next);
@@ -338,21 +338,21 @@ public class PlayersScreen extends Screen {
 
 	private void changePage(int delta) {
 		page += delta;
-		clearAndInit();
+		rebuildWidgets();
 	}
 
 	private void openPlayer(PlayerDetail player) {
 		status = "Loading " + player.name() + "...";
 		PlayerScreen.rememberTab(category);
-		stats.fetchPlayer(player.uuid(), FightViews.get(), PlayerScreen.openingTab(null)).whenComplete((detail, error) -> client.execute(() -> {
-			if (client.currentScreen != this) return;
+		stats.fetchPlayer(player.uuid(), FightViews.get(), PlayerScreen.openingTab(null)).whenComplete((detail, error) -> minecraft.execute(() -> {
+			if (Mc.screen(minecraft) != this) return;
 			if (error != null) {
 				status = "Couldn't load " + player.name() + ": " + Format.error(error);
 			} else {
 				status = null;
 				PlayerScreen screen = new PlayerScreen(this, detail, stats, null).withAdminMod(mod);
 				screen.setOnAdminChange(() -> stale = true);
-				client.setScreen(screen);
+				Mc.setScreen(minecraft, screen);
 			}
 		}));
 	}
@@ -360,22 +360,22 @@ public class PlayersScreen extends Screen {
 	// ---- Admin ----
 
 	private void confirmDelete(PlayerDetail player) {
-		client.setScreen(new ConfirmScreen(yes -> {
-			client.setScreen(this);
+		Mc.setScreen(minecraft, new ConfirmScreen(yes -> {
+			Mc.setScreen(minecraft, this);
 			if (yes) delete(player);
 		},
-				Text.literal("Delete " + player.name() + "'s data?").formatted(Formatting.RED),
-				Text.literal("This deletes ALL of " + player.name() + "'s stats from the server: every fight, swap, gun and combo total, "
+				Component.literal("Delete " + player.name() + "'s data?").withStyle(ChatFormatting.RED),
+				Component.literal("This deletes ALL of " + player.name() + "'s stats from the server: every fight, swap, gun and combo total, "
 						+ "in every PvP - not just this leaderboard.\n\nIt cannot be undone.")));
 	}
 
 	private void delete(PlayerDetail player) {
 		status = "Deleting " + player.name() + "'s data...";
-		clearAndInit();
-		stats.deletePlayerData(player.uuid()).whenComplete((result, error) -> client.execute(() -> {
+		rebuildWidgets();
+		stats.deletePlayerData(player.uuid()).whenComplete((result, error) -> minecraft.execute(() -> {
 			if (error != null) {
 				status = "Couldn't delete: " + Format.error(error);
-				clearAndInit();
+				rebuildWidgets();
 				return;
 			}
 			notice = "Deleted " + player.name() + "'s data (" + result.deletedFights() + " fights)";
@@ -395,13 +395,13 @@ public class PlayersScreen extends Screen {
 		int x = right;
 		for (int i = columns.size() - 1; i >= 0; i--) {
 			out[i] = x;
-			x -= Math.max(textRenderer.getWidth(sortLabel(columns.get(i))), 26) + 10;
+			x -= Math.max(font.width(sortLabel(columns.get(i))), 26) + 10;
 		}
 		return out;
 	}
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
+	public void draw(Gfx context, int mouseX, int mouseY, float deltaTicks) {
 		// The same dark page as the other stats screens.
 		context.fill(0, 0, width, height, Ui.PAGE);
 		int left = (width - rowWidth()) / 2;
@@ -411,43 +411,43 @@ public class PlayersScreen extends Screen {
 		// Panel behind the table, drawn before the row buttons.
 		int panelBottom = TABLE_TOP + Math.max(1, end - start) * ROW_HEIGHT + 2;
 		Ui.panel(context, left - 6, TABLE_TOP - 20, rowWidth() + 12, panelBottom - (TABLE_TOP - 20), Ui.accent(category));
-		super.render(context, mouseX, mouseY, deltaTicks);
+		super.draw(context, mouseX, mouseY, deltaTicks);
 
 		// Underline the selected tab in its category's color.
 		int tabX = tabsLeft() + category.ordinal() * (TAB_WIDTH + TAB_GAP);
 		context.fill(tabX + 2, TABS_Y + 21, tabX + TAB_WIDTH - 2, TABS_Y + 23, Ui.accent(category));
 
-		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 8, Ui.TEXT);
-		context.drawCenteredTextWithShadow(textRenderer, Text.literal(status != null ? status : subtitle()), width / 2, 20,
+		context.centeredText(font, title, width / 2, 8, Ui.TEXT);
+		context.centeredText(font, Component.literal(status != null ? status : subtitle()), width / 2, 20,
 				status != null ? Ui.OK : Ui.MUTED);
 
 		int[] rights = columnRights(left);
 		String[] headings = columns().stream().map(this::sortLabel).toArray(String[]::new);
 		int headY = TABLE_TOP - 13;
-		Ui.textRight(context, textRenderer, "#", left + 22, headY, Ui.MUTED);
-		context.drawTextWithShadow(textRenderer, "Player", left + 28, headY, Ui.MUTED);
+		Ui.textRight(context, font, "#", left + 22, headY, Ui.MUTED);
+		context.text(font, "Player", left + 28, headY, Ui.MUTED);
 		// The column the list is ranked by is lit up.
 		int rankedBy = columns().indexOf(sort());
-		for (int i = 0; i < headings.length; i++) Ui.textRight(context, textRenderer, headings[i], rights[i], headY, i == rankedBy ? Ui.TEXT : Ui.MUTED);
+		for (int i = 0; i < headings.length; i++) Ui.textRight(context, font, headings[i], rights[i], headY, i == rankedBy ? Ui.TEXT : Ui.MUTED);
 
 		for (int i = start; i < end; i++) drawRow(context, entries.get(i), left, TABLE_TOP + (i - start) * ROW_HEIGHT + 6, rights);
 
 		if (board != null && entries.isEmpty()) {
-			context.drawCenteredTextWithShadow(textRenderer,
-					Text.literal(!search.isEmpty() && !ranked.isEmpty() ? "No player matches \"" + search + "\"." : filter != null ? "No " + category.label + " fights match that filter." : "No " + category.label + " fights recorded yet."),
+			context.centeredText(font,
+					Component.literal(!search.isEmpty() && !ranked.isEmpty() ? "No player matches \"" + search + "\"." : filter != null ? "No " + category.label + " fights match that filter." : "No " + category.label + " fights recorded yet."),
 					width / 2, TABLE_TOP + 6, Ui.MUTED);
 		}
-		if (notice != null) context.drawCenteredTextWithShadow(textRenderer, Text.literal(notice), width / 2, height - 42, Ui.GOOD);
+		if (notice != null) context.centeredText(font, Component.literal(notice), width / 2, height - 42, Ui.GOOD);
 		else if (AdminMode.isOn()) {
-			context.drawCenteredTextWithShadow(textRenderer, Text.literal("ADMIN MODE"), width / 2, height - 42, Ui.BAD);
+			context.centeredText(font, Component.literal("ADMIN MODE"), width / 2, height - 42, Ui.BAD);
 		}
 	}
 
-	private void drawRow(DrawContext context, Leaderboard.Entry entry, int left, int y, int[] rights) {
+	private void drawRow(Gfx context, Leaderboard.Entry entry, int left, int y, int[] rights) {
 		PlayerDetail p = entry.detail();
 		boolean ranked = entry.ranked();
-		Ui.textRight(context, textRenderer, ranked ? String.valueOf(entry.rank()) : "-", left + 22, y, Ui.MUTED);
-		context.drawTextWithShadow(textRenderer, Ui.fit(textRenderer, p.name(), rights[0] - Math.max(textRenderer.getWidth(sortLabel(columns().get(0))), 26) - 8 - (left + 28)), left + 28, y, ranked ? Ui.TEXT : Ui.MUTED);
+		Ui.textRight(context, font, ranked ? String.valueOf(entry.rank()) : "-", left + 22, y, Ui.MUTED);
+		context.text(font, Ui.fit(font, p.name(), rights[0] - Math.max(font.width(sortLabel(columns().get(0))), 26) - 8 - (left + 28)), left + 28, y, ranked ? Ui.TEXT : Ui.MUTED);
 
 		Ratings.Result r = entry.ratings();
 		List<Leaderboard.Sort> columns = columns();
@@ -460,16 +460,16 @@ public class PlayersScreen extends Screen {
 				case MOVEMENT -> rating(context, r.movement(), rights[i], y);
 				case KD -> {
 					double kd = PlayerScreen.kd(p.kills(), p.deaths());
-					Ui.textRight(context, textRenderer, String.format("%.2f", kd), rights[i], y, PlayerScreen.kdColor(kd));
+					Ui.textRight(context, font, String.format("%.2f", kd), rights[i], y, PlayerScreen.kdColor(kd));
 				}
-				case FIGHTS -> Ui.textRight(context, textRenderer, String.valueOf(p.fights()), rights[i], y, Ui.LABEL);
+				case FIGHTS -> Ui.textRight(context, font, String.valueOf(p.fights()), rights[i], y, Ui.LABEL);
 			}
 		}
 	}
 
-	private void rating(DrawContext context, Double value, int right, int y) {
-		if (value == null) Ui.textRight(context, textRenderer, "-", right, y, Ui.MUTED);
-		else Ui.textRight(context, textRenderer, String.valueOf(Math.round(value)), right, y, Ui.scoreColor(value));
+	private void rating(Gfx context, Double value, int right, int y) {
+		if (value == null) Ui.textRight(context, font, "-", right, y, Ui.MUTED);
+		else Ui.textRight(context, font, String.valueOf(Math.round(value)), right, y, Ui.scoreColor(value));
 	}
 
 	/** "Last 25 fights  ·  12 players  ·  page 1 of 2", or the filter in words. */

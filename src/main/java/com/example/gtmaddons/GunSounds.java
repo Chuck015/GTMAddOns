@@ -2,7 +2,7 @@ package com.example.gtmaddons;
 
 import com.example.gtmaddons.gun.ShotResult;
 import com.example.gtmaddons.gun.ShotTracker;
-import net.minecraft.util.Identifier;
+import net.minecraft.resources.Identifier;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -19,7 +19,8 @@ import java.util.Map;
  * shown with every gun that's been heard using it.
  *
  * Movement sounds (wingsuit boost, jetpack thrust, wingsuit equip) are
- * built in, from the dev logs; one slider can cover several sounds.
+ * built in, from the dev logs; one slider can cover several sounds. Two more sliders turn down Minecraft's own hit sounds: Being hit (the hurt
+ * sound at your own position) and Default hit sounds (melee attack sounds and the hurt sound of whoever you damage).
  *
  * Which gun uses which sound is learned from ShotTracker: the sound that
  * plays at your position in the same tick as a shot. A pairing is only
@@ -34,6 +35,9 @@ public final class GunSounds {
 	public static final GunSounds INSTANCE = new GunSounds();
 
 	private static final int MIN_USES = 3;
+
+	/** The loudest a slider can be set (250%). Minecraft never plays above 100%, so the part above it is played as extra copies (LouderSounds). */
+	public static final float MAX_VOLUME = 2.5f;
 
 	/**
 	 * Every GTM gun's shot sound, from the dev logs (2026-09-26, 361 shots), so they're
@@ -77,6 +81,21 @@ public final class GunSounds {
 			new Category("Wingsuit equip", List.of("minecraft:item.armor.equip_elytra"),
 					"Putting a wingsuit on"));
 
+	/** Keys of the two hit sliders in Settings.gunSoundVolumes (they are not sound ids: one slider covers sounds by where they play). */
+	private static final String BEING_HIT = "gtmaddons:being_hit", DEFAULT_HIT = "gtmaddons:default_hit";
+	/** The hurt sounds a player makes. entity.blaze.hurt and entity.iron_golem.hurt are gun sounds and are not in this list. */
+	private static final java.util.Set<String> HURT_SOUNDS = java.util.Set.of("minecraft:entity.player.hurt", "minecraft:entity.player.hurt_on_fire",
+			"minecraft:entity.player.hurt_drown", "minecraft:entity.player.hurt_freeze", "minecraft:entity.player.hurt_sweet_berry_bush");
+	/** Vanilla melee sounds: entity.player.attack.strong / weak / crit / knockback / sweep / nodamage. */
+	private static final String ATTACK_PREFIX = "minecraft:entity.player.attack.";
+	/** A hurt sound this close to you is yours; a little further counts if you were damaged a moment ago (the sound plays where the server has you). */
+	private static final double OWN_SOUND_BLOCKS = 1.0, OWN_SOUND_AFTER_DAMAGE_BLOCKS = 10.0;
+	private static final long OWN_DAMAGE_WINDOW_NANOS = 500_000_000L;
+
+	private static final List<Category> HITS = List.of(
+			new Category("Being hit", List.of(BEING_HIT), "The hurt sound when you take damage"),
+			new Category("Default hit sounds", List.of(DEFAULT_HIT), "Minecraft's own hit sounds: your melee attack sounds and the hurt sound of whoever you damage"));
+
 	/** Whether a sound is a wingsuit/jetpack sound - never a gunshot. */
 	public static boolean isMovementSound(String soundId) {
 		for (Category category : MOVEMENT) {
@@ -94,6 +113,10 @@ public final class GunSounds {
 	public record Category(String name, List<String> soundIds, String detail) {}
 
 	private Settings settings;
+	/** Where you are, updated every frame (setPlayer), and when you last took damage (onOwnDamage). */
+	private volatile boolean playerKnown = false;
+	private volatile double playerX, playerY, playerZ;
+	private volatile long ownDamageNanos = 0L;
 
 	private GunSounds() {}
 
@@ -125,6 +148,48 @@ public final class GunSounds {
 		return volume != null ? volume : 1.0f;
 	}
 
+	/** Every frame: where the player is (known = false with no player in a world). */
+	public void setPlayer(boolean known, double x, double y, double z) {
+		playerKnown = known;
+		playerX = x;
+		playerY = y;
+		playerZ = z;
+	}
+
+	/** The damage packet for the player arrived: the hurt sound that follows is theirs. */
+	public void onOwnDamage() {
+		ownDamageNanos = System.nanoTime();
+	}
+
+	private boolean isOwnHurtSound(double x, double y, double z) {
+		if (!playerKnown) return false;
+		double dx = x - playerX, dy = y - playerY, dz = z - playerZ;
+		double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+		if (distance <= OWN_SOUND_BLOCKS) return true;
+		return System.nanoTime() - ownDamageNanos <= OWN_DAMAGE_WINDOW_NANOS && distance <= OWN_SOUND_AFTER_DAMAGE_BLOCKS;
+	}
+
+	/**
+	 * Volume multiplier for a sound that starts or updates at this position: the hit sliders decide the hurt and melee attack sounds (a hurt sound
+	 * at your own position is "Being hit", any other is the damage tick of someone you hit); everything else is as volumeFor(soundId).
+	 */
+	public float volumeFor(Identifier soundId, double x, double y, double z) {
+		if (settings == null || settings.gunSoundVolumes.isEmpty()) return 1.0f;
+		String id = soundId.toString();
+		String key = null;
+		if (HURT_SOUNDS.contains(id)) key = isOwnHurtSound(x, y, z) ? BEING_HIT : DEFAULT_HIT;
+		else if (id.startsWith(ATTACK_PREFIX)) key = DEFAULT_HIT;
+		if (key == null) return volumeFor(soundId);
+		Float volume = settings.gunSoundVolumes.get(key);
+		return volume != null ? volume : 1.0f;
+	}
+
+	/** How much louder than 100% this sound is set (0 = not louder): 1.5 means one and a half extra copies' worth. Same rules as volumeFor. */
+	public float boostFor(Identifier soundId, double x, double y, double z) {
+		float volume = volumeFor(soundId, x, y, z);
+		return volume > 1.0f ? volume - 1.0f : 0.0f;
+	}
+
 	/** A slider's volume (all its sounds share one). */
 	public float volume(Category category) {
 		return settings.gunSoundVolumes.getOrDefault(category.soundIds().get(0), 1.0f);
@@ -132,7 +197,7 @@ public final class GunSounds {
 
 	public void setVolume(Category category, float volume) {
 		for (String soundId : category.soundIds()) {
-			if (volume >= 0.995f) settings.gunSoundVolumes.remove(soundId);
+			if (Math.abs(volume - 1.0f) < 0.005f) settings.gunSoundVolumes.remove(soundId);
 			else settings.gunSoundVolumes.put(soundId, volume);
 		}
 		settings.save();
@@ -154,6 +219,7 @@ public final class GunSounds {
 	 */
 	public List<Category> categories() {
 		List<Category> all = new ArrayList<>(MOVEMENT);
+		all.addAll(HITS);
 		all.addAll(gunCategories());
 		return all;
 	}

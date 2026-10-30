@@ -15,6 +15,9 @@ package com.example.gtmaddons.stats;
  * where the cursor was relative to the window centre when the inventory appeared (0, 0 in vanilla when opened from gameplay),
  * directPx/approachPx the straight and the travelled distance to the slot, guiX/guiY/scaledW/scaledH/guiScale where the inventory
  * was drawn (the recipe book moves it), creative 1 for the creative inventory, fromScreen 1 when it replaced another screen.
+ * closeHow / closeKey and the *N counts say how the inventory was closed and how much input it saw (see SwapInputs).
+ * slotChanges lists the inventory slots that differ between opening and closing ("none" if nothing moved), clickPackets how many
+ * slot-click packets the client sent meanwhile (a hand-made swap sends them one by one, code that edits the slots directly sends none).
  */
 public record SwapRecord(
 		long ts,
@@ -52,14 +55,24 @@ public record SwapRecord(
 		Double afterSMs,
 		Double afterDMs,
 		Double afterWindowMs,
-		Double afterStrafeSwitches
+		Double afterStrafeSwitches,
+		String closeHow,
+		Double closeKey,
+		Double keysN,
+		Double hotbarKeysN,
+		Double clicksN,
+		Double scrollsN,
+		Double movesN,
+		Double framesN,
+		String slotChanges,
+		Double clickPackets
 ) {
 	/** This record with the movement keys over the window after the swap filled in (see MovementInputTracker). */
 	public SwapRecord withAfterInput(double wMs, double aMs, double sMs, double dMs, double windowMs, double strafeSwitches) {
 		return new SwapRecord(ts, result, totalMs, reachMs, slotToHotbarMs, hotbarToCloseMs, wingToHotbarMs, mouseDeg, approachDeg,
 				neededDeg, efficiency, awayDeg, overflickDeg, overflickPeakDeg, afterDeg, category, swapType, speedBeforeBps, speedAfterBps,
 				cursorDx, cursorDy, directPx, approachPx, guiX, guiY, scaledW, scaledH, guiScale, creative, fromScreen,
-				wMs, aMs, sMs, dMs, windowMs, strafeSwitches);
+				wMs, aMs, sMs, dMs, windowMs, strafeSwitches, closeHow, closeKey, keysN, hotbarKeysN, clicksN, scrollsN, movesN, framesN, slotChanges, clickPackets);
 	}
 
 	/** This record with speedAfterBps filled in (it's measured after the swap ends). */
@@ -67,6 +80,6 @@ public record SwapRecord(
 		return new SwapRecord(ts, result, totalMs, reachMs, slotToHotbarMs, hotbarToCloseMs, wingToHotbarMs, mouseDeg, approachDeg,
 				neededDeg, efficiency, awayDeg, overflickDeg, overflickPeakDeg, afterDeg, category, swapType, speedBeforeBps, bps,
 					cursorDx, cursorDy, directPx, approachPx, guiX, guiY, scaledW, scaledH, guiScale, creative, fromScreen,
-					afterWMs, afterAMs, afterSMs, afterDMs, afterWindowMs, afterStrafeSwitches);
+					afterWMs, afterAMs, afterSMs, afterDMs, afterWindowMs, afterStrafeSwitches, closeHow, closeKey, keysN, hotbarKeysN, clicksN, scrollsN, movesN, framesN, slotChanges, clickPackets);
 	}
 }

@@ -2,15 +2,15 @@ package com.example.gtmaddons.gun;
 
 import com.example.gtmaddons.GunSounds;
 import com.example.gtmaddons.PvpCategory;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.network.PlayerListEntry;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.text.Text;
-import net.minecraft.util.Hand;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -175,29 +175,29 @@ public final class ShotTracker {
 
 	// ---- Per frame ----
 
-	public void onFrame(MinecraftClient client) {
+	public void onFrame(Minecraft client) {
 		long now = System.nanoTime();
-		ClientPlayerEntity player = client.player;
+		LocalPlayer player = client.player;
 		// Velocity is blocks per tick; x20 for blocks per second.
-		double bps = player != null ? Math.hypot(player.getVelocity().x, player.getVelocity().z) * 20.0 : 0.0;
+		double bps = player != null ? Math.hypot(player.getDeltaMovement().x, player.getDeltaMovement().z) * 20.0 : 0.0;
 		if (player == null) {
 			lastGun = null;
 			lastAmmo = null;
 			useWasPressed = false;
 		} else {
-			ItemStack held = player.getStackInHand(Hand.MAIN_HAND);
-			Object nameKey = held.isEmpty() ? null : held.getName();
+			ItemStack held = player.getItemInHand(InteractionHand.MAIN_HAND);
+			Object nameKey = held.isEmpty() ? null : held.getHoverName();
 			// The name only changes when the item or its ammo count does: parse it then, not every frame.
 			if (nameKey != parsedNameKey) {
 				parsedNameKey = nameKey;
-				String name = nameKey == null ? "" : held.getName().getString();
+				String name = nameKey == null ? "" : held.getHoverName().getString();
 				parsedAmmo = parseAmmo(name);
 				parsedGun = parsedAmmo != null ? gunName(name) : null;
 			}
 			Integer ammo = parsedAmmo;
 			String gun = parsedGun;
 
-			boolean usePressed = client.options.useKey.isPressed();
+			boolean usePressed = client.options.keyUse.isDown();
 			if (usePressed && !useWasPressed && gun != null) triggerPulledNanos = now;
 			useWasPressed = usePressed;
 
@@ -229,7 +229,7 @@ public final class ShotTracker {
 	// ---- Incoming signals (game thread) ----
 
 	public void onDamage(Entity target, int causeId) {
-		MinecraftClient client = MinecraftClient.getInstance();
+		Minecraft client = Minecraft.getInstance();
 		if (client.player == null || causeId != client.player.getId()) return;
 		String name = target != null ? target.getName().getString() : "unknown";
 		double distance = target != null ? client.player.distanceTo(target) : Double.NaN;
@@ -238,15 +238,15 @@ public final class ShotTracker {
 
 	/** A player wearing a wingsuit (a glider in the chest slot), or gliding right now. */
 	public static boolean isOnWingsuit(Entity entity) {
-		return entity instanceof PlayerEntity player
-				&& (player.isGliding() || PvpCategory.isWingsuit(player.getEquippedStack(EquipmentSlot.CHEST)));
+		return entity instanceof Player player
+				&& (player.isFallFlying() || PvpCategory.isWingsuit(player.getItemBySlot(EquipmentSlot.CHEST)));
 	}
 
 	/** For dev mode: what a damaged player had on their chest and whether they were gliding. */
 	private static String describeGear(Entity entity) {
-		if (!(entity instanceof PlayerEntity player)) return "not a player";
-		var chest = player.getEquippedStack(EquipmentSlot.CHEST);
-		return String.format("chest \"%s\", gliding %s", chest.isEmpty() ? "-" : chest.getName().getString(), player.isGliding());
+		if (!(entity instanceof Player player)) return "not a player";
+		var chest = player.getItemBySlot(EquipmentSlot.CHEST);
+		return String.format("chest \"%s\", gliding %s", chest.isEmpty() ? "-" : chest.getHoverName().getString(), player.isFallFlying());
 	}
 
 	/**
@@ -259,13 +259,13 @@ public final class ShotTracker {
 		return gun.toLowerCase(Locale.ROOT).contains("net launcher");
 	}
 
-	public void onSubtitle(Text text) {
+	public void onSubtitle(Component text) {
 		if (text.getString().contains(HEADSHOT_MARKER)) {
 			events.add(new Event(System.nanoTime(), Kind.HEADSHOT, null, Double.NaN));
 		}
 	}
 
-	public void onMessage(Text text, boolean actionBar) {
+	public void onMessage(Component text, boolean actionBar) {
 		if (actionBar) return;
 		Matcher matcher = KILL_PATTERN.matcher(text.getString());
 		if (matcher.find()) events.add(new Event(System.nanoTime(), Kind.KILL, matcher.group(1), Double.NaN));
@@ -278,7 +278,7 @@ public final class ShotTracker {
 
 	// ---- Matching ----
 
-	private ShotResult resolve(MinecraftClient client, Shot shot) {
+	private ShotResult resolve(Minecraft client, Shot shot) {
 		boolean hit = false, headshot = false, kill = false;
 		String target = null, gunshotSound = null;
 		double distance = Double.NaN;
@@ -404,9 +404,9 @@ public final class ShotTracker {
 
 	// ---- Helpers ----
 
-	static int ping(MinecraftClient client) {
-		if (client.player == null || client.getNetworkHandler() == null) return -1;
-		PlayerListEntry entry = client.getNetworkHandler().getPlayerListEntry(client.player.getUuid());
+	static int ping(Minecraft client) {
+		if (client.player == null || client.getConnection() == null) return -1;
+		PlayerInfo entry = client.getConnection().getPlayerInfo(client.player.getUUID());
 		return entry != null ? entry.getLatency() : -1;
 	}
 

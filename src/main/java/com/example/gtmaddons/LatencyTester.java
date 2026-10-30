@@ -1,11 +1,12 @@
 package com.example.gtmaddons;
 
+import com.example.gtmaddons.compat.Mc;
 import com.example.gtmaddons.gun.ShotResult;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 
 import java.util.Set;
 
@@ -62,12 +63,12 @@ public final class LatencyTester {
 		report("Gun", shot.responseMs(), gun);
 	}
 
-	public void onFrame(MinecraftClient client) {
-		ClientPlayerEntity player = client.player;
-		boolean sneakDown = client.options.sneakKey.isPressed();
+	public void onFrame(Minecraft client) {
+		LocalPlayer player = client.player;
+		boolean sneakDown = client.options.keyShift.isDown();
 		if (enabled && player != null) {
 			long now = System.nanoTime();
-			if (sneakDown && !sneakWasDown && player.isGliding() && boostPressedNanos < 0) boostPressedNanos = now;
+			if (sneakDown && !sneakWasDown && player.isFallFlying() && boostPressedNanos < 0) boostPressedNanos = now;
 			if (boostPressedNanos >= 0 && now - boostPressedNanos > BOOST_TIMEOUT_NANOS) boostPressedNanos = -1L;
 		}
 		sneakWasDown = sneakDown;
@@ -88,15 +89,15 @@ public final class LatencyTester {
 	 * The time is green when quick, yellow when middling, red when slow.
 	 */
 	private static void report(String what, long ms, Stat stat) {
-		MinecraftClient client = MinecraftClient.getInstance();
+		Minecraft client = Minecraft.getInstance();
 		if (client.player == null) return;
-		Formatting speed = ms <= FAST_MS ? Formatting.GREEN : ms <= SLOW_MS ? Formatting.YELLOW : Formatting.RED;
-		MutableText line = Text.literal("\u23F1 ").formatted(Formatting.DARK_AQUA)
-				.append(Text.literal(what + "  ").formatted(Formatting.AQUA))
-				.append(Text.literal(ms + "ms").formatted(speed, Formatting.BOLD))
-				.append(Text.literal(String.format("   avg %dms \u00B7 best %dms \u00B7 %d %s",
+		ChatFormatting speed = ms <= FAST_MS ? ChatFormatting.GREEN : ms <= SLOW_MS ? ChatFormatting.YELLOW : ChatFormatting.RED;
+		MutableComponent line = Component.literal("\u23F1 ").withStyle(ChatFormatting.DARK_AQUA)
+				.append(Component.literal(what + "  ").withStyle(ChatFormatting.AQUA))
+				.append(Component.literal(ms + "ms").withStyle(speed, ChatFormatting.BOLD))
+				.append(Component.literal(String.format("   avg %dms \u00B7 best %dms \u00B7 %d %s",
 						stat.totalMs / stat.count, stat.bestMs, stat.count, stat.count == 1 ? "test" : "tests"))
-						.formatted(Formatting.DARK_GRAY));
-		client.player.sendMessage(line, false);
+						.withStyle(ChatFormatting.DARK_GRAY));
+		Mc.chat(client.player, line);
 	}
 }

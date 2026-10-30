@@ -1,13 +1,14 @@
 package com.example.gtmaddons.gui;
 
-import com.example.gtmaddons.GunSounds;
 import com.example.gtmaddons.GunSounds.Category;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.SliderWidget;
-import net.minecraft.screen.ScreenTexts;
-import net.minecraft.text.Text;
+import com.example.gtmaddons.GunSounds;
+import com.example.gtmaddons.compat.Gfx;
+import com.example.gtmaddons.compat.Mc;
+import com.example.gtmaddons.compat.ModScreen;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 
 import java.util.List;
 
@@ -16,7 +17,7 @@ import java.util.List;
  * gunshot sound. Guns that share a sound are listed together under it,
  * since they can't be told apart.
  */
-public class GunSoundsScreen extends Screen {
+public class GunSoundsScreen extends ModScreen {
 
 	private static final int ROW_HEIGHT = 24;
 	private static final int TOP = 44;
@@ -27,7 +28,7 @@ public class GunSoundsScreen extends Screen {
 	private int page = 0;
 
 	public GunSoundsScreen(Screen parent) {
-		super(Text.literal("GTMAddOns - Sounds"));
+		super(Component.literal("GTMAddOns - Sounds"));
 		this.parent = parent;
 	}
 
@@ -50,37 +51,38 @@ public class GunSoundsScreen extends Screen {
 		int end = Math.min(categories.size(), start + perPage);
 		for (int i = start; i < end; i++) {
 			int y = TOP + (i - start) * ROW_HEIGHT;
-			addDrawableChild(new VolumeSlider(rowLeft + rowWidth() - SLIDER_WIDTH, y + 2, categories.get(i)));
+			addRenderableWidget(new VolumeSlider(rowLeft + rowWidth() - SLIDER_WIDTH, y + 2, categories.get(i)));
 		}
 
 		int bottom = height - 28;
-		ButtonWidget prev = addDrawableChild(ButtonWidget.builder(Text.literal("< Prev"), b -> changePage(-1))
-				.dimensions(width / 2 - 155, bottom, 70, 20).build());
+		Button prev = addRenderableWidget(ThemedButton.create(Component.literal("< Prev"), b -> changePage(-1))
+				.bounds(width / 2 - 155, bottom, 70, 20).build());
 		prev.active = page > 0;
-		addDrawableChild(ButtonWidget.builder(ScreenTexts.BACK, b -> close())
-				.dimensions(width / 2 - 75, bottom, 150, 20).build());
-		ButtonWidget next = addDrawableChild(ButtonWidget.builder(Text.literal("Next >"), b -> changePage(1))
-				.dimensions(width / 2 + 85, bottom, 70, 20).build());
+		addRenderableWidget(ThemedButton.create(CommonComponents.GUI_BACK, b -> onClose())
+				.bounds(width / 2 - 75, bottom, 150, 20).build());
+		Button next = addRenderableWidget(ThemedButton.create(Component.literal("Next >"), b -> changePage(1))
+				.bounds(width / 2 + 85, bottom, 70, 20).build());
 		next.active = end < categories.size();
 	}
 
 	private void changePage(int delta) {
 		page += delta;
-		clearAndInit();
+		rebuildWidgets();
 	}
 
 	@Override
-	public void close() {
-		client.setScreen(parent);
+	public void onClose() {
+		Mc.setScreen(minecraft, parent);
 	}
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
-		super.render(context, mouseX, mouseY, deltaTicks);
-		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 12, 0xFFFFFFFF);
+	public void draw(Gfx context, int mouseX, int mouseY, float deltaTicks) {
+		context.fill(0, 0, width, height, Ui.PAGE);
+		super.draw(context, mouseX, mouseY, deltaTicks);
+		context.centeredText(font, title, width / 2, 12, 0xFFFFFFFF);
 
 		if (categories.isEmpty()) {
-			context.drawCenteredTextWithShadow(textRenderer, Text.literal("No gun sounds heard yet."),
+			context.centeredText(font, Component.literal("No gun sounds heard yet."),
 					width / 2, height / 2, 0xFFAAAAAA);
 			return;
 		}
@@ -93,30 +95,32 @@ public class GunSoundsScreen extends Screen {
 			Category category = categories.get(i);
 			int y = TOP + (i - start) * ROW_HEIGHT;
 			int textWidth = rowWidth() - SLIDER_WIDTH - 8;
-			String name = textRenderer.trimToWidth(category.name(), textWidth);
-			context.drawTextWithShadow(textRenderer, name, rowLeft, y + 8, 0xFFFFFFFF);
+			String name = font.plainSubstrByWidth(category.name(), textWidth);
+			context.text(font, name, rowLeft, y + 8, 0xFFFFFFFF);
 		}
 	}
 
-	/** 0-100% volume for one sound, saved as it's dragged. */
-	private static final class VolumeSlider extends SliderWidget {
+	/** 0-250% volume for one sound, saved as it's dragged. */
+	private static final class VolumeSlider extends ThemedSlider {
 		private final Category category;
 
 		VolumeSlider(int x, int y, Category category) {
-			super(x, y, SLIDER_WIDTH, 20, Text.empty(), GunSounds.INSTANCE.volume(category));
+			super(x, y, SLIDER_WIDTH, 20, Component.empty(), GunSounds.INSTANCE.volume(category) / GunSounds.MAX_VOLUME);
 			this.category = category;
 			updateMessage();
 		}
 
 		@Override
 		protected void updateMessage() {
-			int percent = (int) Math.round(value * 100);
-			setMessage(Text.literal(percent == 0 ? "Volume: Muted" : "Volume: " + percent + "%"));
+			int percent = (int) Math.round(value * 100 * GunSounds.MAX_VOLUME);
+			setMessage(Component.literal(percent == 0 ? "Volume: Muted" : "Volume: " + percent + "%"));
 		}
 
 		@Override
 		protected void applyValue() {
-			GunSounds.INSTANCE.setVolume(category, (float) value);
+			float volume = (float) value * GunSounds.MAX_VOLUME;
+			// Close to 100% sits exactly on 100% (the default).
+			GunSounds.INSTANCE.setVolume(category, Math.abs(volume - 1.0f) < 0.03f ? 1.0f : volume);
 		}
 	}
 }

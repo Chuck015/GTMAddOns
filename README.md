@@ -548,24 +548,17 @@ mod placed in the right mods folder for your Lunar profile should load the
 same way it would in vanilla Fabric — check Lunar's mod-loading docs if it
 doesn't pick it up automatically.
 
-## Version caveats (please read)
+## Version notes
 
-I pinned `minecraft_version`, `yarn_mappings`, `loader_version`, and
-`fabric_version` in `gradle.properties` to what looked right for 1.21.11 as
-of writing, but Minecraft/Fabric version strings shift often and I can't
-fully guarantee these are exact as of when you build this. If Gradle fails
-to resolve a dependency:
+`gradle.properties` pins `minecraft_version`, `loader_version`, and
+`fabric_version`; the code is written against Mojang's official names
+(`loom.officialMojangMappings()`). If Gradle fails to resolve a dependency,
+check https://fabricmc.net/develop for the versions recommended for
+Minecraft 1.21.11 and update `gradle.properties` to match.
 
-1. Check https://fabricmc.net/develop for the current recommended versions
-   for Minecraft 1.21.11 and update `gradle.properties` to match.
-2. The class/method names used (`InventoryScreen`/`CreativeInventoryScreen`,
-   the `HudRenderCallback` signature taking `(DrawContext,
-   RenderTickCounter)`, `EquipmentSlot`, and the client command
-   registration signature) have been stable in recent Yarn mappings, but
-   if you get a "cannot resolve symbol" error on any of them, use
-   IntelliJ's "Go to Class" (Ctrl+N) to search for the class by a partial
-   name and find what it's actually called in your exact mappings — this
-   is exactly how we fixed `AbstractInventoryScreen` not existing earlier.
+The source is in two folders: `src/main/java` is the mod itself, and
+`src/version/java` holds what depends on the game version (the `compat`
+package, a few mixins and the trajectory lines).
 
 ## Customizing
 

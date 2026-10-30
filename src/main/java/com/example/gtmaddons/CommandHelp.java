@@ -1,9 +1,10 @@
 package com.example.gtmaddons;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import com.example.gtmaddons.compat.Mc;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 
 /**
  * "/gao help": every command the mod has, in chat. Keep COMMANDS in step with
@@ -24,16 +25,16 @@ public final class CommandHelp {
 	};
 
 	public static void send() {
-		MinecraftClient client = MinecraftClient.getInstance();
+		Minecraft client = Minecraft.getInstance();
 		if (client.player == null) return;
-		client.player.sendMessage(Text.literal("━━━━━━━━━ ").formatted(Formatting.DARK_GRAY)
-				.append(Text.literal("GTMAddOns commands").formatted(Formatting.GOLD, Formatting.BOLD))
-				.append(Text.literal(" ━━━━━━━━━").formatted(Formatting.DARK_GRAY)), false);
+		Mc.chat(client.player, Component.literal("━━━━━━━━━ ").withStyle(ChatFormatting.DARK_GRAY)
+				.append(Component.literal("GTMAddOns commands").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD))
+				.append(Component.literal(" ━━━━━━━━━").withStyle(ChatFormatting.DARK_GRAY)));
 		for (String[] command : COMMANDS) {
-			MutableText line = Text.literal(" " + command[0]).formatted(Formatting.YELLOW)
-					.append(Text.literal("  " + command[1]).formatted(Formatting.GRAY));
-			client.player.sendMessage(line, false);
+			MutableComponent line = Component.literal(" " + command[0]).withStyle(ChatFormatting.YELLOW)
+					.append(Component.literal("  " + command[1]).withStyle(ChatFormatting.GRAY));
+			Mc.chat(client.player, line);
 		}
-		client.player.sendMessage(Text.literal(" /gtmaddons and /GTMAddOns function the same as /gao").formatted(Formatting.DARK_GRAY), false);
+		Mc.chat(client.player, Component.literal(" /gtmaddons and /GTMAddOns function the same as /gao").withStyle(ChatFormatting.DARK_GRAY));
 	}
 }

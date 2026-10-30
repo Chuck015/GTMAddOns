@@ -3,17 +3,18 @@ package com.example.gtmaddons;
 import com.example.gtmaddons.gun.DevFilter;
 import com.example.gtmaddons.gun.DevLogger;
 import com.example.gtmaddons.gun.ShotTracker;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.render.RenderLayers;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.item.ItemStack;
-import net.minecraft.util.hit.BlockHitResult;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
+import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,31 +45,36 @@ public final class TrajectoryLines {
 	/** Aqua, so it stands out from the particle stream. */
 	private static final int RED = 0x55, GREEN = 0xFF, BLUE = 0xFF;
 
-	private record Line(Vec3d from, Vec3d to, long nanos) {}
+	private record Line(Vec3 from, Vec3 to, long nanos) {}
 
 	private final List<Line> lines = new ArrayList<>();
 
 	private TrajectoryLines() {}
 
 	/** Called as the game handles a right click (use item), before it is sent to the server. */
-	public void onUse(MinecraftClient client) {
-		ClientPlayerEntity player = client.player;
-		if (!DevLogger.INSTANCE.wants(DevFilter.TRAJECTORY) || player == null || client.world == null) return;
-		ItemStack held = player.getMainHandStack();
-		if (held.isEmpty() || ShotTracker.parseAmmo(held.getName().getString()) == null) return;
+	public void onUse(Minecraft client) {
+		LocalPlayer player = client.player;
+		if (!DevLogger.INSTANCE.wants(DevFilter.TRAJECTORY) || player == null || client.level == null) return;
+		ItemStack held = player.getMainHandItem();
+		if (held.isEmpty() || ShotTracker.parseAmmo(held.getHoverName().getString()) == null) return;
 
-		Vec3d eye = player.getEyePos();
-		Vec3d end = eye.add(player.getRotationVec(1.0f).multiply(MAX_RANGE));
-		BlockHitResult block = client.world.raycast(new RaycastContext(
-				eye, end, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, player));
-		if (block.getType() != HitResult.Type.MISS) end = block.getPos();
+		Vec3 eye = player.getEyePosition();
+		Vec3 end = eye.add(player.getViewVector(1.0f).scale(MAX_RANGE));
+		BlockHitResult block = client.level.clip(new ClipContext(
+				eye, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+		if (block.getType() != HitResult.Type.MISS) end = block.getLocation();
 
 		lines.add(new Line(eye, end, System.nanoTime()));
 		while (lines.size() > MAX_LINES) lines.removeFirst();
 	}
 
 	/** Draws the lines. Vertices are relative to the camera, as the world renderer expects. */
-	public void render(WorldRenderContext context) {
+	/** Draws the lines in every frame. */
+	public void register() {
+		WorldRenderEvents.BEFORE_DEBUG_RENDER.register(this::render);
+	}
+
+	private void render(WorldRenderContext context) {
 		if (lines.isEmpty()) return;
 		// Turned off (or dev/QA mode ended): drop what's left instead of showing it.
 		if (!DevLogger.INSTANCE.wants(DevFilter.TRAJECTORY)) {
@@ -79,24 +85,24 @@ public final class TrajectoryLines {
 		lines.removeIf(line -> now - line.nanos() > LIFETIME_NANOS);
 		if (lines.isEmpty()) return;
 
-		MinecraftClient client = MinecraftClient.getInstance();
-		Vec3d camera = client.gameRenderer.getCamera().getCameraPos();
-		MatrixStack.Entry entry = context.matrices().peek();
-		VertexConsumer buffer = context.consumers().getBuffer(RenderLayers.linesTranslucent());
+		Minecraft client = Minecraft.getInstance();
+		Vec3 camera = client.gameRenderer.getMainCamera().position();
+		PoseStack.Pose entry = context.matrices().last();
+		VertexConsumer buffer = context.consumers().getBuffer(RenderTypes.linesTranslucent());
 
 		for (Line line : lines) {
 			long age = now - line.nanos();
 			double fade = age > LIFETIME_NANOS - FADE_NANOS ? (double) (LIFETIME_NANOS - age) / FADE_NANOS : 1.0;
 			int alpha = (int) Math.round(255 * Math.max(0.0, Math.min(1.0, fade)));
 
-			Vec3d from = line.from().subtract(camera), to = line.to().subtract(camera);
-			Vec3d direction = line.to().subtract(line.from()).normalize();
+			Vec3 from = line.from().subtract(camera), to = line.to().subtract(camera);
+			Vec3 direction = line.to().subtract(line.from()).normalize();
 			float nx = (float) direction.x, ny = (float) direction.y, nz = (float) direction.z;
 
-			buffer.vertex(entry, (float) from.x, (float) from.y, (float) from.z)
-					.color(RED, GREEN, BLUE, alpha).normal(entry, nx, ny, nz).lineWidth(LINE_WIDTH);
-			buffer.vertex(entry, (float) to.x, (float) to.y, (float) to.z)
-					.color(RED, GREEN, BLUE, alpha).normal(entry, nx, ny, nz).lineWidth(LINE_WIDTH);
+			buffer.addVertex(entry, (float) from.x, (float) from.y, (float) from.z)
+					.setColor(RED, GREEN, BLUE, alpha).setNormal(entry, nx, ny, nz).setLineWidth(LINE_WIDTH);
+			buffer.addVertex(entry, (float) to.x, (float) to.y, (float) to.z)
+					.setColor(RED, GREEN, BLUE, alpha).setNormal(entry, nx, ny, nz).setLineWidth(LINE_WIDTH);
 		}
 	}
 }

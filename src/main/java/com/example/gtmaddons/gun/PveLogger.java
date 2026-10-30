@@ -1,16 +1,17 @@
 package com.example.gtmaddons.gun;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.client.gui.screen.ingame.InventoryScreen;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.LoreComponent;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.util.Formatting;
+import com.example.gtmaddons.compat.Mc;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.ItemLore;
 
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -89,7 +90,7 @@ final class PveLogger {
 					quantity > 1 ? " for " + quantity + " (" + money(each) + " each)" : "", (long) stats[0], money(stats[1] / stats[0]), money(stats[2]), money(stats[3]));
 			printing = true;
 			try {
-				DevLogger.chat("Price - " + line, Formatting.GOLD);
+				DevLogger.chat("Price - " + line, ChatFormatting.GOLD);
 			} finally {
 				printing = false;
 			}
@@ -142,10 +143,10 @@ final class PveLogger {
 	private int writes = 0;
 
 	/** A screen was opened (or resized): start reading it if it is one of the machines. */
-	void onScreenOpened(MinecraftClient client, Screen screen) {
+	void onScreenOpened(Minecraft client, Screen screen) {
 		if (screen == target) return;
 		target = null;
-		if (!(screen instanceof HandledScreen<?>) || screen instanceof InventoryScreen || screen instanceof CreativeInventoryScreen) return;
+		if (!(screen instanceof AbstractContainerScreen<?>) || screen instanceof InventoryScreen || screen instanceof CreativeModeInventoryScreen) return;
 		String name = clean(screen.getTitle().getString());
 		for (String[] m : MACHINES) {
 			if (Pattern.compile(m[1], Pattern.CASE_INSENSITIVE).matcher(name).find()) {
@@ -163,13 +164,13 @@ final class PveLogger {
 	}
 
 	/** Every frame while a machine GUI is open: once its contents stop changing for a moment, write them down. */
-	void onFrame(MinecraftClient client) {
+	void onFrame(Minecraft client) {
 		if (target == null) return;
-		if (client.currentScreen != target || client.player == null) {
+		if (Mc.screen(client) != target || client.player == null) {
 			target = null;
 			return;
 		}
-		HandledScreen<?> screen = (HandledScreen<?>) target;
+		AbstractContainerScreen<?> screen = (AbstractContainerScreen<?>) target;
 		List<ItemStack> items = contents(client, screen);
 		StringBuilder signature = new StringBuilder();
 		boolean any = false;
@@ -197,11 +198,11 @@ final class PveLogger {
 	}
 
 	/** The GUI's own slots in order (the player's inventory slots are left out); the position is the slot number. */
-	private List<ItemStack> contents(MinecraftClient client, HandledScreen<?> screen) {
+	private List<ItemStack> contents(Minecraft client, AbstractContainerScreen<?> screen) {
 		List<ItemStack> items = new ArrayList<>();
-		for (Slot slot : screen.getScreenHandler().slots) {
-			if (slot.inventory == client.player.getInventory()) continue;
-			items.add(slot.getStack());
+		for (Slot slot : screen.getMenu().slots) {
+			if (slot.container == client.player.getInventory()) continue;
+			items.add(slot.getItem());
 		}
 		return items;
 	}
@@ -234,7 +235,7 @@ final class PveLogger {
 		if (shown == 0) lines.add("  (no other items)");
 		log.writePve("BUSINESS  " + machine, lines);
 		DevLogger.chat("Business - read the " + machine + " (" + (items.size() - countEmpty(items)) + " items, book: "
-				+ (book.isEmpty() ? "none" : clean(book.getName().getString())) + ")" + (log.isSavingLog() ? " - saved to gtmaddons-pve.log" : " (QA mode - not saved)"), Formatting.AQUA);
+				+ (book.isEmpty() ? "none" : clean(book.getHoverName().getString())) + ")" + (log.isSavingLog() ? " - saved to gtmaddons-pve.log" : " (QA mode - not saved)"), ChatFormatting.AQUA);
 	}
 
 	private static int countEmpty(List<ItemStack> items) {
@@ -248,7 +249,7 @@ final class PveLogger {
 	/** One line: id, count, name and the first lines of lore. */
 	private static String line(ItemStack stack) {
 		StringBuilder sb = new StringBuilder();
-		sb.append(Registries.ITEM.getId(stack.getItem())).append(" x").append(stack.getCount()).append("  name=\"").append(clean(stack.getName().getString())).append('"');
+		sb.append(BuiltInRegistries.ITEM.getKey(stack.getItem())).append(" x").append(stack.getCount()).append("  name=\"").append(clean(stack.getHoverName().getString())).append('"');
 		List<String> lore = loreLines(stack);
 		if (!lore.isEmpty()) sb.append("  lore=[").append(String.join(" | ", lore)).append(']');
 		return sb.toString();
@@ -257,8 +258,8 @@ final class PveLogger {
 	/** The item's lore lines, formatting removed. */
 	private static List<String> loreLines(ItemStack stack) {
 		List<String> out = new ArrayList<>();
-		LoreComponent lore = stack.get(DataComponentTypes.LORE);
-		if (lore != null) for (net.minecraft.text.Text t : lore.lines()) out.add(clean(t.getString()));
+		ItemLore lore = stack.get(DataComponents.LORE);
+		if (lore != null) for (net.minecraft.network.chat.Component t : lore.lines()) out.add(clean(t.getString()));
 		return out;
 	}
 

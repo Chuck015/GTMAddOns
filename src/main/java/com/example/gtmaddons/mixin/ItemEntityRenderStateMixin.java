@@ -1,8 +1,8 @@
 package com.example.gtmaddons.mixin;
 
 import com.example.gtmaddons.DroppedLabelState;
-import net.minecraft.client.render.entity.state.ItemEntityRenderState;
-import net.minecraft.text.Text;
+import net.minecraft.client.renderer.entity.state.ItemEntityRenderState;
+import net.minecraft.network.chat.Component;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 
@@ -10,15 +10,15 @@ import org.spongepowered.asm.mixin.Unique;
 @Mixin(ItemEntityRenderState.class)
 public abstract class ItemEntityRenderStateMixin implements DroppedLabelState {
 	@Unique
-	private Text gtmaddons$label;
+	private Component gtmaddons$label;
 
 	@Override
-	public Text gtmaddons$getLabel() {
+	public Component gtmaddons$getLabel() {
 		return gtmaddons$label;
 	}
 
 	@Override
-	public void gtmaddons$setLabel(Text label) {
+	public void gtmaddons$setLabel(Component label) {
 		gtmaddons$label = label;
 	}
 }

@@ -1,17 +1,16 @@
 package com.example.gtmaddons.gun;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -56,18 +55,18 @@ final class EquipmentLogger {
 		lastScanNanos = 0L;
 	}
 
-	void onFrame(MinecraftClient client) {
+	void onFrame(Minecraft client) {
 		long now = System.nanoTime();
 		if (now - lastScanNanos < SCAN_NANOS) return;
 		lastScanNanos = now;
-		PlayerEntity me = client.player;
-		if (client.world == null || me == null) {
+		Player me = client.player;
+		if (client.level == null || me == null) {
 			if (!seen.isEmpty()) reset();
 			return;
 		}
 		java.util.Set<UUID> present = new java.util.HashSet<>();
-		for (PlayerEntity p : client.world.getPlayers()) {
-			UUID id = p.getUuid();
+		for (Player p : client.level.players()) {
+			UUID id = p.getUUID();
 			present.add(id);
 			boolean self = p == me;
 			double distance = self ? 0.0 : me.distanceTo(p);
@@ -85,7 +84,7 @@ final class EquipmentLogger {
 			List<String> changes = new ArrayList<>();
 			List<String> detail = new ArrayList<>();
 			for (int i = 0; i < SLOTS; i++) {
-				ItemStack stack = p.getEquippedStack(ORDER[i]);
+				ItemStack stack = p.getItemBySlot(ORDER[i]);
 				now6[i] = signature(stack);
 				String before = previous != null ? previous[i] : null;
 				if (before == null || !before.equals(now6[i])) {
@@ -98,11 +97,11 @@ final class EquipmentLogger {
 			List<String> lines = new ArrayList<>();
 			lines.add(String.format("%s%s  %s  %s  armor=%d  health=%.1f  gliding=%s", name, self ? " (YOU)" : "",
 					previous == null ? "FIRST SEEN" : "CHANGED", self ? "" : String.format("%.1f blocks away", distance),
-					p.getArmor(), p.getHealth(), p.isGliding()));
+					p.getArmorValue(), p.getHealth(), p.isFallFlying()));
 			lines.addAll(detail);
 			log.writeBlock("EQUIPMENT  " + name, lines);
 			if (previous != null && (self || distance <= CHAT_RANGE)) {
-				DevLogger.chat(name + (self ? " (you)" : "") + " now: " + String.join(", ", changes), Formatting.GRAY);
+				DevLogger.chat(name + (self ? " (you)" : "") + " now: " + String.join(", ", changes), ChatFormatting.GRAY);
 			}
 		}
 		// Players that disappeared: the last distance we saw them at is how far the server sends players.
@@ -117,17 +116,17 @@ final class EquipmentLogger {
 		logInventory(me);
 	}
 
-	private void logInventory(PlayerEntity me) {
+	private void logInventory(Player me) {
 		StringBuilder sig = new StringBuilder();
-		PlayerInventory inventory = me.getInventory();
-		for (int i = 0; i < inventory.size(); i++) sig.append(i).append('=').append(signature(inventory.getStack(i))).append(';');
+		Inventory inventory = me.getInventory();
+		for (int i = 0; i < inventory.getContainerSize(); i++) sig.append(i).append('=').append(signature(inventory.getItem(i))).append(';');
 		String signature = sig.toString();
 		if (signature.equals(inventorySignature)) return;
 		inventorySignature = signature;
 		List<String> lines = new ArrayList<>();
 		lines.add("YOUR INVENTORY  (slot 0-8 hotbar, 9-35 main, 36-39 armor feet to head)");
-		for (int i = 0; i < inventory.size(); i++) {
-			ItemStack stack = inventory.getStack(i);
+		for (int i = 0; i < inventory.getContainerSize(); i++) {
+			ItemStack stack = inventory.getItem(i);
 			if (i == 40) continue; // the off hand is not tracked
 			if (!stack.isEmpty()) lines.add("  [" + i + "]  " + describe(stack));
 		}
@@ -137,7 +136,7 @@ final class EquipmentLogger {
 	/** What counts as a change: the item and its name without the ammo counter. */
 	private static String signature(ItemStack stack) {
 		if (stack.isEmpty()) return "-";
-		return itemId(stack) + " | " + stripCounter(stack.getName().getString());
+		return itemId(stack) + " | " + stripCounter(stack.getHoverName().getString());
 	}
 
 	private static String shortName(String signature) {
@@ -151,7 +150,7 @@ final class EquipmentLogger {
 	}
 
 	private static String itemId(ItemStack stack) {
-		return Registries.ITEM.getId(stack.getItem()).toString();
+		return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
 	}
 
 	/** Everything we can read from one item. */
@@ -159,8 +158,8 @@ final class EquipmentLogger {
 		if (stack.isEmpty()) return "(empty)";
 		StringBuilder sb = new StringBuilder();
 		sb.append(itemId(stack)).append(" x").append(stack.getCount());
-		sb.append("  name=\"").append(stack.getName().getString()).append('"');
-		if (stack.getMaxDamage() > 0) sb.append("  durability=").append(stack.getMaxDamage() - stack.getDamage()).append('/').append(stack.getMaxDamage());
+		sb.append("  name=\"").append(stack.getHoverName().getString()).append('"');
+		if (stack.getMaxDamage() > 0) sb.append("  durability=").append(stack.getMaxDamage() - stack.getDamageValue()).append('/').append(stack.getMaxDamage());
 		StringBuilder components = new StringBuilder();
 		for (var component : stack.getComponents()) {
 			if (components.length() > 0) components.append(", ");

@@ -1,21 +1,21 @@
 package com.example.gtmaddons.gun;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.component.DataComponentTypes;
-import net.minecraft.component.type.AttributeModifiersComponent;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.entity.attribute.EntityAttributeInstance;
-import net.minecraft.entity.attribute.EntityAttributeModifier;
-import net.minecraft.entity.attribute.EntityAttributes;
-import net.minecraft.entity.effect.StatusEffectInstance;
-import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.Registries;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.hit.EntityHitResult;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.ItemAttributeModifiers;
+import net.minecraft.world.phys.EntityHitResult;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -136,45 +136,45 @@ final class MeleeDamageDebugger {
 	// ---- Hooks (game thread) ----
 
 	/** A left click, just before the game handles it: the charge at this moment is what the hit will use. */
-	void beforeAttack(MinecraftClient client) {
-		ClientPlayerEntity player = client.player;
+	void beforeAttack(Minecraft client) {
+		LocalPlayer player = client.player;
 		if (player == null) return;
 		int targetId = -1;
 		float health = Float.NaN;
 		String targetName = "";
 		double distance = Double.NaN;
 		LivingEntity aimed = null;
-		if (client.crosshairTarget instanceof EntityHitResult hit && hit.getEntity() instanceof LivingEntity living) {
+		if (client.hitResult instanceof EntityHitResult hit && hit.getEntity() instanceof LivingEntity living) {
 			aimed = living;
 			targetId = living.getId();
 			health = living.getHealth() + living.getAbsorptionAmount();
 			targetName = living.getName().getString();
 			distance = player.distanceTo(living);
 		}
-		ItemStack held = player.getMainHandStack();
-		lastClick = new Click(System.nanoTime(), player.getAttackCooldownProgress(0.5f), targetId, health, targetName,
-				held.isEmpty() ? "empty hand" : held.getName().getString(), distance, player.getAttributeValue(EntityAttributes.ATTACK_DAMAGE));
+		ItemStack held = player.getMainHandItem();
+		lastClick = new Click(System.nanoTime(), player.getAttackStrengthScale(0.5f), targetId, health, targetName,
+				held.isEmpty() ? "empty hand" : held.getHoverName().getString(), distance, player.getAttributeValue(Attributes.ATTACK_DAMAGE));
 		// Only melee clicks on another player are judged for a missing damage event.
-		if (aimed instanceof PlayerEntity && com.example.gtmaddons.ComboTracker.isMeleeItem(held)) {
+		if (aimed instanceof Player && com.example.gtmaddons.ComboTracker.isMeleeItem(held)) {
 			clicks.add(lastClick);
 			while (clicks.size() > 20) clicks.remove(0);
 		}
 	}
 
 	/** A damage event caused by you on another entity. */
-	void onHit(MinecraftClient client, int targetId, String damageType) {
-		ClientPlayerEntity player = client.player;
-		if (player == null || client.world == null) return;
-		Entity target = client.world.getEntityById(targetId);
+	void onHit(Minecraft client, int targetId, String damageType) {
+		LocalPlayer player = client.player;
+		if (player == null || client.level == null) return;
+		Entity target = client.level.getEntity(targetId);
 		if (!(target instanceof LivingEntity living)) return;
-		ItemStack held = player.getMainHandStack();
+		ItemStack held = player.getMainHandItem();
 		// Gun hits are damage events too; only melee items are looked at here.
 		if (!com.example.gtmaddons.ComboTracker.isMeleeItem(held)) return;
 
 		long now = System.nanoTime();
 		for (Click c : clicks) if (c.targetId == targetId && now - c.nanos <= CLICK_MATCH_NANOS) c.eventSeen = true;
 		Click click = lastClick != null && now - lastClick.nanos <= CLICK_MATCH_NANOS ? lastClick : null;
-		double charge = click != null ? click.charge : player.getAttackCooldownProgress(0.5f);
+		double charge = click != null ? click.charge : player.getAttackStrengthScale(0.5f);
 
 		float before = Float.NaN;
 		if (click != null && click.targetId == targetId && !Float.isNaN(click.targetHealthBefore)) before = click.targetHealthBefore;
@@ -183,16 +183,16 @@ final class MeleeDamageDebugger {
 		if (lastFrame != null && (Float.isNaN(before) || pendingFor(targetId) == null)) before = lastFrame;
 		if (Float.isNaN(before)) before = living.getHealth() + living.getAbsorptionAmount();
 
-		pending.add(makeHit(player, living, held.isEmpty() ? "empty hand" : held.getName().getString(), damageType, before, charge,
-				player.getAttributeValue(EntityAttributes.ATTACK_DAMAGE)));
+		pending.add(makeHit(player, living, held.isEmpty() ? "empty hand" : held.getHoverName().getString(), damageType, before, charge,
+				player.getAttributeValue(Attributes.ATTACK_DAMAGE)));
 	}
 
 	/** A hit with what vanilla would deal for it: attack damage x charge, then the target's armor, toughness and resistance. */
-	private Hit makeHit(ClientPlayerEntity player, LivingEntity living, String weapon, String damageType, float before, double charge,
+	private Hit makeHit(LocalPlayer player, LivingEntity living, String weapon, String damageType, float before, double charge,
 			double attackDamage) {
-		double armor = living.getArmor();
-		double toughness = living.getAttributeValue(EntityAttributes.ARMOR_TOUGHNESS);
-		StatusEffectInstance resistance = living.getStatusEffect(StatusEffects.RESISTANCE);
+		double armor = living.getArmorValue();
+		double toughness = living.getAttributeValue(Attributes.ARMOR_TOUGHNESS);
+		MobEffectInstance resistance = living.getEffect(MobEffects.RESISTANCE);
 		int resistanceLevel = resistance != null ? resistance.getAmplifier() + 1 : 0;
 
 		double raw = attackDamage * (0.2 + charge * charge * 0.8);
@@ -209,9 +209,9 @@ final class MeleeDamageDebugger {
 	}
 
 	/** Every frame: read finished hits, watch the attack damage attribute, announce a newly held melee item. */
-	void onFrame(MinecraftClient client) {
-		ClientPlayerEntity player = client.player;
-		if (player == null || client.world == null) {
+	void onFrame(Minecraft client) {
+		LocalPlayer player = client.player;
+		if (player == null || client.level == null) {
 			reset();
 			return;
 		}
@@ -222,8 +222,8 @@ final class MeleeDamageDebugger {
 
 		// After resolving, so a hit read this frame still compares against the earlier reading.
 		healthLastFrame.clear();
-		for (PlayerEntity other : client.world.getPlayers()) {
-			if (other != player && other.squaredDistanceTo(player) <= NEARBY * NEARBY) {
+		for (Player other : client.level.players()) {
+			if (other != player && other.distanceToSqr(player) <= NEARBY * NEARBY) {
 				healthLastFrame.put(other.getId(), other.getHealth() + other.getAbsorptionAmount());
 			}
 		}
@@ -231,14 +231,14 @@ final class MeleeDamageDebugger {
 
 	// ---- Clicks the server never answered with a damage event ----
 
-	private void resolveClicks(MinecraftClient client, ClientPlayerEntity player) {
+	private void resolveClicks(Minecraft client, LocalPlayer player) {
 		long now = System.nanoTime();
 		for (Iterator<Click> it = clicks.iterator(); it.hasNext(); ) {
 			Click c = it.next();
 			if (now - c.nanos < CLICK_RESOLVE_NANOS) continue;
 			it.remove();
 			if (c.eventSeen) continue; // onHit handled it
-			Entity target = client.world.getEntityById(c.targetId);
+			Entity target = client.level.getEntity(c.targetId);
 			boolean gone = !(target instanceof LivingEntity) || !target.isAlive();
 			double after = gone ? 0.0 : ((LivingEntity) target).getHealth() + ((LivingEntity) target).getAbsorptionAmount();
 			double dealt = Math.max(0.0, c.targetHealthBefore - after);
@@ -253,20 +253,20 @@ final class MeleeDamageDebugger {
 			// A fully charged click that did nothing is the suspicious one; fast clicks blank on their own.
 			if (c.charge >= 0.9 && !gone) {
 				DevLogger.chat(String.format("Melee click did nothing: %s on %s, charge %.0f%% - no damage event, no health change", c.weapon, c.targetName, c.charge * 100),
-						Formatting.YELLOW);
+						ChatFormatting.YELLOW);
 			}
 		}
 	}
 
 	// ---- Hits ----
 
-	private void resolveHits(MinecraftClient client) {
+	private void resolveHits(Minecraft client) {
 		long now = System.nanoTime();
 		for (Iterator<Hit> it = pending.iterator(); it.hasNext(); ) {
 			Hit hit = it.next();
 			if (now - hit.nanos < HIT_RESOLVE_NANOS) continue;
 			it.remove();
-			Entity target = client.world.getEntityById(hit.targetId);
+			Entity target = client.level.getEntity(hit.targetId);
 			boolean gone = !(target instanceof LivingEntity living) || !target.isAlive();
 			double after = gone ? 0.0 : ((LivingEntity) target).getHealth() + ((LivingEntity) target).getAbsorptionAmount();
 			double dealt = Math.max(0.0, hit.healthBefore - after);
@@ -282,11 +282,11 @@ final class MeleeDamageDebugger {
 				hit.expected, hit.attackDamage, hit.charge * 100, hit.raw, hit.armor, hit.toughness,
 				hit.resistanceLevel > 0 ? ", resistance " + hit.resistanceLevel : "",
 				hit.healthBefore, hit.healthBefore - dealt, hit.damageType, hit.attackerState);
-		log.openWindow(MinecraftClient.getInstance());
+		log.openWindow(Minecraft.getInstance());
 		log.add((low ? "LOW DAMAGE  " : "") + text);
 		if (low) {
 			DevLogger.chat(String.format("Melee damage LOW: %s on %s dealt %.1f (%.1f hearts), vanilla ~%.1f. Attack damage %.1f, charge %.0f%%",
-					hit.weapon, hit.targetName, dealt, dealt / 2.0, hit.expected, hit.attackDamage, hit.charge * 100), Formatting.RED);
+					hit.weapon, hit.targetName, dealt, dealt / 2.0, hit.expected, hit.attackDamage, hit.charge * 100), ChatFormatting.RED);
 		}
 	}
 
@@ -297,13 +297,13 @@ final class MeleeDamageDebugger {
 		return damage * (1.0 - g / 25.0);
 	}
 
-	private static String attackerState(ClientPlayerEntity player) {
+	private static String attackerState(LocalPlayer player) {
 		StringBuilder state = new StringBuilder("you:");
-		state.append(player.isSprinting() ? " sprinting" : "").append(player.isOnGround() ? " on-ground" : " airborne");
-		if (player.isGliding()) state.append(" gliding");
-		for (StatusEffectInstance effect : player.getStatusEffects()) {
-			if (effect.getEffectType().matches(StatusEffects.WEAKNESS) || effect.getEffectType().matches(StatusEffects.STRENGTH)) {
-				state.append(' ').append(effect.getEffectType().getIdAsString()).append(' ').append(effect.getAmplifier() + 1);
+		state.append(player.isSprinting() ? " sprinting" : "").append(player.onGround() ? " on-ground" : " airborne");
+		if (player.isFallFlying()) state.append(" gliding");
+		for (MobEffectInstance effect : player.getActiveEffects()) {
+			if (effect.getEffect().is(MobEffects.WEAKNESS) || effect.getEffect().is(MobEffects.STRENGTH)) {
+				state.append(' ').append(effect.getEffect().getRegisteredName()).append(' ').append(effect.getAmplifier() + 1);
 			}
 		}
 		return state.toString();
@@ -312,21 +312,21 @@ final class MeleeDamageDebugger {
 	// ---- The attack damage attribute and the held item ----
 
 	/** Logs a change of your attack damage attribute: the server sends it after a weapon swap, so a late or missing one shows here. */
-	private void watchAttackDamage(ClientPlayerEntity player) {
-		double value = player.getAttributeValue(EntityAttributes.ATTACK_DAMAGE);
+	private void watchAttackDamage(LocalPlayer player) {
+		double value = player.getAttributeValue(Attributes.ATTACK_DAMAGE);
 		if (!Double.isNaN(lastAttackDamage) && Math.abs(value - lastAttackDamage) > 0.001) {
-			ItemStack held = player.getMainHandStack();
-			log.openWindow(MinecraftClient.getInstance());
+			ItemStack held = player.getMainHandItem();
+			log.openWindow(Minecraft.getInstance());
 			log.add(String.format("ATTACK DAMAGE  attribute %.2f -> %.2f while holding \"%s\"  %s",
-					lastAttackDamage, value, held.isEmpty() ? "empty hand" : held.getName().getString(), attributeBreakdown(player)));
+					lastAttackDamage, value, held.isEmpty() ? "empty hand" : held.getHoverName().getString(), attributeBreakdown(player)));
 		}
 		lastAttackDamage = value;
 	}
 
 	/** When you start holding a different item: what it says it adds, against what your attribute really is. */
-	private void watchHeldItem(MinecraftClient client, ClientPlayerEntity player) {
-		ItemStack held = player.getMainHandStack();
-		String key = held.isEmpty() ? "" : Registries.ITEM.getId(held.getItem()) + "|" + ShotTracker.gunName(held.getName().getString());
+	private void watchHeldItem(Minecraft client, LocalPlayer player) {
+		ItemStack held = player.getMainHandItem();
+		String key = held.isEmpty() ? "" : BuiltInRegistries.ITEM.getKey(held.getItem()) + "|" + ShotTracker.gunName(held.getHoverName().getString());
 		if (key.equals(lastHeldKey)) return;
 		lastHeldKey = key;
 		if (!com.example.gtmaddons.ComboTracker.isMeleeItem(held)) return;
@@ -334,32 +334,32 @@ final class MeleeDamageDebugger {
 		double baseFist = 1.0;
 		double fromItem = 0.0;
 		StringBuilder mods = new StringBuilder();
-		AttributeModifiersComponent component = held.get(DataComponentTypes.ATTRIBUTE_MODIFIERS);
+		ItemAttributeModifiers component = held.get(DataComponents.ATTRIBUTE_MODIFIERS);
 		if (component != null) {
-			for (AttributeModifiersComponent.Entry entry : component.modifiers()) {
-				EntityAttributeModifier modifier = entry.modifier();
-				String attribute = entry.attribute().getIdAsString();
-				mods.append(String.format("%s %s %+.2f (%s); ", attribute, modifier.operation(), modifier.value(), entry.slot()));
-				if (entry.attribute().matches(EntityAttributes.ATTACK_DAMAGE) && modifier.operation() == EntityAttributeModifier.Operation.ADD_VALUE) {
-					fromItem += modifier.value();
+			for (ItemAttributeModifiers.Entry entry : component.modifiers()) {
+				AttributeModifier modifier = entry.modifier();
+				String attribute = entry.attribute().getRegisteredName();
+				mods.append(String.format("%s %s %+.2f (%s); ", attribute, modifier.operation(), modifier.amount(), entry.slot()));
+				if (entry.attribute().is(Attributes.ATTACK_DAMAGE) && modifier.operation() == AttributeModifier.Operation.ADD_VALUE) {
+					fromItem += modifier.amount();
 				}
 			}
 		}
-		double actual = player.getAttributeValue(EntityAttributes.ATTACK_DAMAGE);
+		double actual = player.getAttributeValue(Attributes.ATTACK_DAMAGE);
 		boolean mismatch = Math.abs((baseFist + fromItem) - actual) > 0.05;
 		log.openWindow(client);
 		log.add(String.format("MELEE ITEM  \"%s\" (%s): item modifiers [%s] -> expected attack damage %.2f; your attribute is %.2f%s  %s",
-				held.getName().getString(), Registries.ITEM.getId(held.getItem()), mods.length() == 0 ? "none on the item" : mods.toString().trim(),
+				held.getHoverName().getString(), BuiltInRegistries.ITEM.getKey(held.getItem()), mods.length() == 0 ? "none on the item" : mods.toString().trim(),
 				baseFist + fromItem, actual, mismatch ? "  MISMATCH (re-check in a moment: the server may still be sending it)" : "", attributeBreakdown(player)));
 	}
 
 	/** The attack damage attribute's base value and every modifier on it. */
-	private static String attributeBreakdown(ClientPlayerEntity player) {
-		EntityAttributeInstance instance = player.getAttributeInstance(EntityAttributes.ATTACK_DAMAGE);
+	private static String attributeBreakdown(LocalPlayer player) {
+		AttributeInstance instance = player.getAttribute(Attributes.ATTACK_DAMAGE);
 		if (instance == null) return "(no attack damage attribute)";
 		StringBuilder out = new StringBuilder(String.format("[base %.2f", instance.getBaseValue()));
-		for (EntityAttributeModifier modifier : instance.getModifiers()) {
-			out.append(String.format("; %s %s %+.2f", modifier.id(), modifier.operation(), modifier.value()));
+		for (AttributeModifier modifier : instance.getModifiers()) {
+			out.append(String.format("; %s %s %+.2f", modifier.id(), modifier.operation(), modifier.amount()));
 		}
 		return out.append(']').toString();
 	}

@@ -1,16 +1,17 @@
 package com.example.gtmaddons.gui;
 
-import com.example.gtmaddons.stats.FightFilter;
+import com.example.gtmaddons.compat.Gfx;
+import com.example.gtmaddons.compat.Mc;
+import com.example.gtmaddons.compat.ModScreen;
 import com.example.gtmaddons.stats.FightFilter.Opponent;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.ClickableWidget;
-import net.minecraft.client.gui.widget.SliderWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.screen.ScreenTexts;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import com.example.gtmaddons.stats.FightFilter;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -35,7 +36,7 @@ import java.util.function.ToIntFunction;
  *            12 fights match
  *            [ Everyone ] [ Apply ] [ Cancel ]
  */
-public class FightFilterScreen extends Screen {
+public class FightFilterScreen extends ModScreen {
 
 	private static final int WIDTH = 224;
 	private static final int ROW = 22;
@@ -55,7 +56,7 @@ public class FightFilterScreen extends Screen {
 	private final Consumer<LeaderboardOptions> onOptions;
 	private int sort, minFights;
 	private boolean showAll;
-	private ClickableWidget minLabel;
+	private AbstractWidget minLabel;
 	private final List<Opponent> everyone;
 	private final Set<String> selected = new HashSet<>();
 	private int limit;
@@ -63,7 +64,7 @@ public class FightFilterScreen extends Screen {
 	private int page = 0;
 	private LimitSlider slider;
 	/** The opponent buttons and pager, rebuilt when the search, page or choices change. */
-	private final List<ClickableWidget> gridWidgets = new ArrayList<>();
+	private final List<AbstractWidget> gridWidgets = new ArrayList<>();
 
 	public FightFilterScreen(Screen parent, String scope, List<Opponent> opponents, FightFilter current,
 			ToIntFunction<FightFilter> matches, Consumer<FightFilter> onApply) {
@@ -73,7 +74,7 @@ public class FightFilterScreen extends Screen {
 	/** For the leaderboard: also Rank by, All ratings and Min fights; onOptions is told the picks on Apply. */
 	public FightFilterScreen(Screen parent, String scope, List<Opponent> opponents, FightFilter current,
 			ToIntFunction<FightFilter> matches, Consumer<FightFilter> onApply, LeaderboardOptions options, Consumer<LeaderboardOptions> onOptions) {
-		super(Text.literal("Filter fights - " + scope));
+		super(Component.literal("Filter fights - " + scope));
 		this.parent = parent;
 		this.scope = scope;
 		this.matches = matches;
@@ -112,32 +113,32 @@ public class FightFilterScreen extends Screen {
 		gridWidgets.clear();
 		int x = left();
 
-		slider = addDrawableChild(new LimitSlider(x, 30, WIDTH - 2 * (20 + GAP)));
-		addDrawableChild(ButtonWidget.builder(Text.literal("-"), b -> slider.set(limit - 1))
-				.dimensions(x + WIDTH - 2 * 20 - GAP, 30, 20, 20).build());
-		addDrawableChild(ButtonWidget.builder(Text.literal("+"), b -> slider.set(limit + 1))
-				.dimensions(x + WIDTH - 20, 30, 20, 20).build());
+		slider = addRenderableWidget(new LimitSlider(x, 30, WIDTH - 2 * (20 + GAP)));
+		addRenderableWidget(ThemedButton.create(Component.literal("-"), b -> slider.set(limit - 1))
+				.bounds(x + WIDTH - 2 * 20 - GAP, 30, 20, 20).build());
+		addRenderableWidget(ThemedButton.create(Component.literal("+"), b -> slider.set(limit + 1))
+				.bounds(x + WIDTH - 20, 30, 20, 20).build());
 
 		if (options != null) {
 			int half = (WIDTH - GAP) / 2;
-			addDrawableChild(ButtonWidget.builder(Text.literal("Rank by: " + options.sorts().get(sort)), b -> {
+			addRenderableWidget(ThemedButton.create(Component.literal("Rank by: " + options.sorts().get(sort)), b -> {
 				sort = (sort + 1) % options.sorts().size();
-				b.setMessage(Text.literal("Rank by: " + options.sorts().get(sort)));
-			}).dimensions(x, 56, half, 20).build());
-			addDrawableChild(ButtonWidget.builder(Text.literal("All ratings: " + (showAll ? "ON" : "OFF")), b -> {
+				b.setMessage(Component.literal("Rank by: " + options.sorts().get(sort)));
+			}).bounds(x, 56, half, 20).build());
+			addRenderableWidget(ThemedButton.create(Component.literal("All ratings: " + (showAll ? "ON" : "OFF")), b -> {
 				showAll = !showAll;
-				b.setMessage(Text.literal("All ratings: " + (showAll ? "ON" : "OFF")));
-			}).dimensions(x + half + GAP, 56, half, 20).build());
-			addDrawableChild(ButtonWidget.builder(Text.literal("-"), b -> stepMinFights(-1)).dimensions(x, 82, 20, 20).build());
-			minLabel = addDrawableChild(ButtonWidget.builder(Text.literal(minFightsText()), b -> stepMinFights(1)).dimensions(x + 20 + GAP, 82, WIDTH - 2 * (20 + GAP), 20).build());
-			addDrawableChild(ButtonWidget.builder(Text.literal("+"), b -> stepMinFights(1)).dimensions(x + WIDTH - 20, 82, 20, 20).build());
+				b.setMessage(Component.literal("All ratings: " + (showAll ? "ON" : "OFF")));
+			}).bounds(x + half + GAP, 56, half, 20).build());
+			addRenderableWidget(ThemedButton.create(Component.literal("-"), b -> stepMinFights(-1)).bounds(x, 82, 20, 20).build());
+			minLabel = addRenderableWidget(ThemedButton.create(Component.literal(minFightsText()), b -> stepMinFights(1)).bounds(x + 20 + GAP, 82, WIDTH - 2 * (20 + GAP), 20).build());
+			addRenderableWidget(ThemedButton.create(Component.literal("+"), b -> stepMinFights(1)).bounds(x + WIDTH - 20, 82, 20, 20).build());
 		}
 
-		TextFieldWidget field = addDrawableChild(new TextFieldWidget(textRenderer, x, searchY(), WIDTH, 20, Text.literal("Search opponents")));
+		EditBox field = addRenderableWidget(new EditBox(font, x, searchY(), WIDTH, 20, Component.literal("Search opponents")));
 		field.setMaxLength(16);
-		field.setPlaceholder(Text.literal("Search opponents...").formatted(Formatting.GRAY));
-		field.setText(search);
-		field.setChangedListener(text -> {
+		field.setHint(Component.literal("Search opponents...").withStyle(ChatFormatting.GRAY));
+		field.setValue(search);
+		field.setResponder(text -> {
 			search = text.trim().toLowerCase(Locale.ROOT);
 			page = 0;
 			buildGrid();
@@ -145,15 +146,15 @@ public class FightFilterScreen extends Screen {
 
 		int bottom = height - 28;
 		int third = (WIDTH - 2 * GAP) / 3;
-		addDrawableChild(ButtonWidget.builder(Text.literal("Everyone"), b -> {
+		addRenderableWidget(ThemedButton.create(Component.literal("Everyone"), b -> {
 			selected.clear();
 			buildGrid();
-		}).dimensions(x, bottom, third, 20)
+		}).bounds(x, bottom, third, 20)
 				.build());
-		addDrawableChild(ButtonWidget.builder(Text.literal("Apply"), b -> apply())
-				.dimensions(x + third + GAP, bottom, third, 20).build());
-		addDrawableChild(ButtonWidget.builder(ScreenTexts.CANCEL, b -> close())
-				.dimensions(x + 2 * (third + GAP), bottom, third, 20).build());
+		addRenderableWidget(ThemedButton.create(Component.literal("Apply"), b -> apply())
+				.bounds(x + third + GAP, bottom, third, 20).build());
+		addRenderableWidget(ThemedButton.create(CommonComponents.GUI_CANCEL, b -> onClose())
+				.bounds(x + 2 * (third + GAP), bottom, third, 20).build());
 
 		buildGrid();
 	}
@@ -167,7 +168,7 @@ public class FightFilterScreen extends Screen {
 	}
 
 	private void buildGrid() {
-		for (ClickableWidget widget : gridWidgets) remove(widget);
+		for (AbstractWidget widget : gridWidgets) removeWidget(widget);
 		gridWidgets.clear();
 
 		List<Opponent> list = shown();
@@ -180,27 +181,27 @@ public class FightFilterScreen extends Screen {
 			Opponent o = list.get(i);
 			int col = (i - start) % 2, row = (i - start) / 2;
 			boolean on = selected.contains(o.key());
-			String name = textRenderer.trimToWidth(o.name(), colWidth - 44);
-			Text label = Text.literal(on ? "✔ " : "").formatted(Formatting.GREEN)
-					.append(Text.literal(name).formatted(on ? Formatting.GREEN : Formatting.WHITE))
-					.append(Text.literal(" (" + o.inCategory() + ")").formatted(o.inCategory() > 0 ? Formatting.GRAY : Formatting.DARK_GRAY));
-			gridWidgets.add(addDrawableChild(ButtonWidget.builder(label, b -> {
+			String name = font.plainSubstrByWidth(o.name(), colWidth - 44);
+			Component label = Component.literal(on ? "✔ " : "").withStyle(ChatFormatting.GREEN)
+					.append(Component.literal(name).withStyle(on ? ChatFormatting.GREEN : ChatFormatting.WHITE))
+					.append(Component.literal(" (" + o.inCategory() + ")").withStyle(o.inCategory() > 0 ? ChatFormatting.GRAY : ChatFormatting.DARK_GRAY));
+			gridWidgets.add(addRenderableWidget(ThemedButton.create(label, b -> {
 				if (!selected.remove(o.key())) selected.add(o.key());
 				buildGrid();
-			}).dimensions(left() + col * (colWidth + GAP), gridTop() + row * ROW, colWidth, 20)
+			}).bounds(left() + col * (colWidth + GAP), gridTop() + row * ROW, colWidth, 20)
 					.build()));
 		}
 
 		int y = gridTop() + rowsPerPage() * ROW + 2;
-		ButtonWidget prev = addDrawableChild(ButtonWidget.builder(Text.literal("< Prev"), b -> {
+		Button prev = addRenderableWidget(ThemedButton.create(Component.literal("< Prev"), b -> {
 			page--;
 			buildGrid();
-		}).dimensions(left(), y, 60, 20).build());
+		}).bounds(left(), y, 60, 20).build());
 		prev.active = page > 0;
-		ButtonWidget next = addDrawableChild(ButtonWidget.builder(Text.literal("Next >"), b -> {
+		Button next = addRenderableWidget(ThemedButton.create(Component.literal("Next >"), b -> {
 			page++;
 			buildGrid();
-		}).dimensions(left() + WIDTH - 60, y, 60, 20).build());
+		}).bounds(left() + WIDTH - 60, y, 60, 20).build());
 		next.active = page < pages - 1;
 		gridWidgets.add(prev);
 		gridWidgets.add(next);
@@ -218,53 +219,54 @@ public class FightFilterScreen extends Screen {
 		if (next < 0) next = 0;
 		if (next >= MIN_FIGHTS_STEPS.length) next = 0;
 		minFights = MIN_FIGHTS_STEPS[next];
-		if (minLabel != null) minLabel.setMessage(Text.literal(minFightsText()));
+		if (minLabel != null) minLabel.setMessage(Component.literal(minFightsText()));
 	}
 
 	private void apply() {
-		client.setScreen(parent);
+		Mc.setScreen(minecraft, parent);
 		if (onOptions != null && options != null) onOptions.accept(new LeaderboardOptions(options.sorts(), sort, minFights, showAll));
 		onApply.accept(new FightFilter(limit, selected));
 	}
 
 	@Override
-	public void close() {
-		client.setScreen(parent);
+	public void onClose() {
+		Mc.setScreen(minecraft, parent);
 	}
 
 	@Override
 	public void tick() {
-		CombatLock.closeIfInCombat(client);
+		CombatLock.closeIfInCombat(minecraft);
 	}
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
-		super.render(context, mouseX, mouseY, deltaTicks);
-		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 10, Ui.TEXT);
+	public void draw(Gfx context, int mouseX, int mouseY, float deltaTicks) {
+		context.fill(0, 0, width, height, Ui.PAGE);
+		super.draw(context, mouseX, mouseY, deltaTicks);
+		context.centeredText(font, title, width / 2, 10, Ui.TEXT);
 
 		List<Opponent> list = shown();
 		int perPage = rowsPerPage() * 2;
 		int pages = Math.max(1, (list.size() + perPage - 1) / perPage);
 		int y = gridTop() + rowsPerPage() * ROW + 8;
-		context.drawCenteredTextWithShadow(textRenderer, Text.literal("page " + (page + 1) + " of " + pages), width / 2, y, Ui.MUTED);
+		context.centeredText(font, Component.literal("page " + (page + 1) + " of " + pages), width / 2, y, Ui.MUTED);
 		if (list.isEmpty()) {
-			context.drawCenteredTextWithShadow(textRenderer, Text.literal(everyone.isEmpty() ? "No fights yet." : "No opponent matches."),
+			context.centeredText(font, Component.literal(everyone.isEmpty() ? "No fights yet." : "No opponent matches."),
 					width / 2, gridTop() + 6, Ui.MUTED);
 		}
 
 		String who = selected.isEmpty() ? "everyone" : selected.size() + (selected.size() == 1 ? " opponent" : " opponents");
 		if (matches != null) {
 			int count = matches.applyAsInt(new FightFilter(limit, selected));
-			context.drawCenteredTextWithShadow(textRenderer,
-					Text.literal(count + (count == 1 ? " fight matches" : " fights match") + " (" + who + ")"),
+			context.centeredText(font,
+					Component.literal(count + (count == 1 ? " fight matches" : " fights match") + " (" + who + ")"),
 					width / 2, height - 42, count > 0 ? Ui.GOOD : Ui.BAD);
 		}
 	}
 
 	/** Fights 1-500. */
-	private final class LimitSlider extends SliderWidget {
+	private final class LimitSlider extends ThemedSlider {
 		LimitSlider(int x, int y, int w) {
-			super(x, y, w, 20, Text.empty(), (limit - 1) / (double) (FightFilter.MAX_FIGHTS - 1));
+			super(x, y, w, 20, Component.empty(), (limit - 1) / (double) (FightFilter.MAX_FIGHTS - 1));
 			updateMessage();
 		}
 
@@ -276,7 +278,7 @@ public class FightFilterScreen extends Screen {
 
 		@Override
 		protected void updateMessage() {
-			setMessage(Text.literal("Fights: " + limit));
+			setMessage(Component.literal("Fights: " + limit));
 		}
 
 		@Override

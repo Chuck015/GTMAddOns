@@ -1,11 +1,13 @@
 package com.example.gtmaddons.gui;
 
+import com.example.gtmaddons.compat.Gfx;
+import com.example.gtmaddons.compat.Mc;
+import com.example.gtmaddons.compat.ModScreen;
 import com.example.gtmaddons.stats.StatsClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.screen.ScreenTexts;
-import net.minecraft.text.Text;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,7 +16,7 @@ import java.util.List;
  * Raw info: everything the server has stored about a player, as plain lines (see RawInfo) - for your own Personal Stats and for every
  * other player's page. Scroll with the mouse wheel; Copy all puts the whole text on the clipboard.
  */
-public class RawInfoScreen extends Screen {
+public class RawInfoScreen extends ModScreen {
 
 	private static final int TOP = 34;
 	private static final int LINE = 10;
@@ -30,12 +32,12 @@ public class RawInfoScreen extends Screen {
 	private int scroll = 0;
 
 	public RawInfoScreen(Screen parent, StatsClient stats, String uuid, String name) {
-		super(Text.literal("Raw info - " + name));
+		super(Component.literal("Raw info - " + name));
 		this.parent = parent;
 		this.stats = stats;
 		this.uuid = uuid;
 		this.name = name;
-		stats.fetchRaw(uuid).whenComplete((result, error) -> net.minecraft.client.MinecraftClient.getInstance().execute(() -> {
+		stats.fetchRaw(uuid).whenComplete((result, error) -> Minecraft.getInstance().execute(() -> {
 			if (error != null) {
 				String why = Format.error(error);
 				status = why.contains("404") ? "The server has nothing stored for this player." : "Couldn't load the raw info: " + why;
@@ -52,12 +54,12 @@ public class RawInfoScreen extends Screen {
 		int y = height - 28;
 		int total = 90 + 40 + 40 + 100 + 3 * 4;
 		int x = (width - total) / 2;
-		addDrawableChild(ButtonWidget.builder(Text.literal("Copy all"), b -> {
-			if (lines != null) client.keyboard.setClipboard(String.join("\n", lines));
-		}).dimensions(x, y, 90, 20).build());
-		addDrawableChild(ButtonWidget.builder(Text.literal("Top"), b -> scroll = 0).dimensions(x + 94, y, 40, 20).build());
-		addDrawableChild(ButtonWidget.builder(Text.literal("End"), b -> scroll = Integer.MAX_VALUE).dimensions(x + 138, y, 40, 20).build());
-		addDrawableChild(ButtonWidget.builder(ScreenTexts.BACK, b -> close()).dimensions(x + 182, y, 100, 20).build());
+		addRenderableWidget(ThemedButton.create(Component.literal("Copy all"), b -> {
+			if (lines != null) minecraft.keyboardHandler.setClipboard(String.join("\n", lines));
+		}).bounds(x, y, 90, 20).build());
+		addRenderableWidget(ThemedButton.create(Component.literal("Top"), b -> scroll = 0).bounds(x + 94, y, 40, 20).build());
+		addRenderableWidget(ThemedButton.create(Component.literal("End"), b -> scroll = Integer.MAX_VALUE).bounds(x + 138, y, 40, 20).build());
+		addRenderableWidget(ThemedButton.create(CommonComponents.GUI_BACK, b -> onClose()).bounds(x + 182, y, 100, 20).build());
 		wrappedFor = -1;
 	}
 
@@ -69,7 +71,7 @@ public class RawInfoScreen extends Screen {
 	private void wrapIfNeeded() {
 		if (lines == null || wrappedFor == width) return;
 		wrapped.clear();
-		for (String line : lines) wrapped.addAll(Ui.chunks(textRenderer, line, width - 16));
+		for (String line : lines) wrapped.addAll(Ui.chunks(font, line, width - 16));
 		wrappedFor = width;
 	}
 
@@ -81,16 +83,17 @@ public class RawInfoScreen extends Screen {
 	}
 
 	@Override
-	public void close() {
-		client.setScreen(parent);
+	public void onClose() {
+		Mc.setScreen(minecraft, parent);
 	}
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
-		super.render(context, mouseX, mouseY, deltaTicks);
-		context.drawCenteredTextWithShadow(textRenderer, Text.literal(title.getString()), width / 2, 12, 0xFFFFFFFF);
+	public void draw(Gfx context, int mouseX, int mouseY, float deltaTicks) {
+		context.fill(0, 0, width, height, Ui.PAGE);
+		super.draw(context, mouseX, mouseY, deltaTicks);
+		context.centeredText(font, Component.literal(title.getString()), width / 2, 12, 0xFFFFFFFF);
 		if (status != null) {
-			context.drawCenteredTextWithShadow(textRenderer, Text.literal(status), width / 2, TOP + 6, 0xFFFFFF55);
+			context.centeredText(font, Component.literal(status), width / 2, TOP + 6, 0xFFFFFF55);
 			return;
 		}
 		wrapIfNeeded();
@@ -101,10 +104,10 @@ public class RawInfoScreen extends Screen {
 		for (int i = scroll; i < wrapped.size() && i < scroll + visible; i++) {
 			String line = wrapped.get(i);
 			int color = line.startsWith("FIGHT") ? 0xFFFFFFFF : line.startsWith("PLAYER") || line.startsWith("COUNTS") || line.startsWith("RAW") ? 0xFF55FFFF : 0xFFB0B6C4;
-			context.drawTextWithShadow(textRenderer, line, 8, y, color);
+			context.text(font, line, 8, y, color);
 			y += LINE;
 		}
 		String note = wrapped.isEmpty() ? "" : (scroll + 1) + "-" + Math.min(wrapped.size(), scroll + visible) + " of " + wrapped.size() + " lines";
-		context.drawTextWithShadow(textRenderer, note, 8, height - 42, 0xFF9AA0AE);
+		context.text(font, note, 8, height - 42, 0xFF9AA0AE);
 	}
 }

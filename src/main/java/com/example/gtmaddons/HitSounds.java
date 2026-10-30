@@ -1,14 +1,14 @@
 package com.example.gtmaddons;
 
 import com.example.gtmaddons.gun.ShotTracker;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.client.sound.PositionedSoundInstance;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.sound.SoundEvent;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import net.minecraft.sounds.SoundEvent;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 
 import java.util.List;
 
@@ -156,12 +156,12 @@ public final class HitSounds {
 
 	/** A damage event from the server (game thread). */
 	public void onDamage(Entity target, int causeId) {
-		MinecraftClient client = MinecraftClient.getInstance();
-		ClientPlayerEntity me = client.player;
+		Minecraft client = Minecraft.getInstance();
+		LocalPlayer me = client.player;
 		if (settings == null || !settings.hitSound || me == null || causeId != me.getId()) return;
-		if (!(target instanceof PlayerEntity) || target == me) return;
+		if (!(target instanceof Player) || target == me) return;
 
-		String held = me.getMainHandStack().isEmpty() ? "" : me.getMainHandStack().getName().getString();
+		String held = me.getMainHandItem().isEmpty() ? "" : me.getMainHandItem().getHoverName().getString();
 		boolean gun = ShotTracker.parseAmmo(held) != null;
 		if (gun && ShotTracker.countsOnlyWingsuitHits(held) && !ShotTracker.isOnWingsuit(target)) return;
 
@@ -172,12 +172,12 @@ public final class HitSounds {
 	}
 
 	/** A subtitle from the server: the headshot marker arrives with the hit. */
-	public void onSubtitle(Text text) {
+	public void onSubtitle(Component text) {
 		if (text.getString().contains(HEADSHOT_MARKER)) headshotNanos = System.nanoTime();
 	}
 
 	/** Judges and plays a held hit once its headshot marker had time to arrive. */
-	public void onFrame(MinecraftClient client) {
+	public void onFrame(Minecraft client) {
 		if (pendingNanos < 0) return;
 		long now = System.nanoTime();
 		if (now - pendingNanos < RESOLVE_NANOS) return;
@@ -192,10 +192,10 @@ public final class HitSounds {
 		if (enabledOf(kind)) play(idOf(kind), volumeOf(kind), pitchOf(kind));
 	}
 
-	/** The loudest a hit sound can be set (200%); see play. */
-	public static final float MAX_VOLUME = 2.0f;
+	/** The loudest a hit sound can be set (500%); see play. */
+	public static final float MAX_VOLUME = 5.0f;
 
-	/** Plays a sound to you only, at the given volume (0-2, above 1 adds extra copies) and pitch. Also used to preview in the menu. */
+	/** Plays a sound to you only, at the given volume (0-5, above 1 adds extra copies) and pitch. Also used to preview in the menu. */
 	public static void play(String soundId, float volume, float pitch) {
 		if (volume <= 0.0f) return;
 		Identifier id = Identifier.tryParse(soundId);
@@ -203,7 +203,7 @@ public final class HitSounds {
 		// Minecraft never plays a sound above 100%, so anything above that is played as extra copies on top of each other.
 		for (float left = Math.min(volume, MAX_VOLUME); left > 0.0f; left -= 1.0f) {
 			float part = Math.min(1.0f, left);
-			MinecraftClient.getInstance().getSoundManager().play(PositionedSoundInstance.ui(SoundEvent.of(id), pitch, part));
+			Minecraft.getInstance().getSoundManager().play(SimpleSoundInstance.forUI(SoundEvent.createVariableRangeEvent(id), pitch, part));
 		}
 	}
 }

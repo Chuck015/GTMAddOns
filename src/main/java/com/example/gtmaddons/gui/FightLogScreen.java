@@ -2,6 +2,9 @@ package com.example.gtmaddons.gui;
 
 import com.example.gtmaddons.AdminMode;
 import com.example.gtmaddons.PvpCategory;
+import com.example.gtmaddons.compat.Gfx;
+import com.example.gtmaddons.compat.Mc;
+import com.example.gtmaddons.compat.ModScreen;
 import com.example.gtmaddons.gui.InsightScreen.Insight;
 import com.example.gtmaddons.rating.Ratings;
 import com.example.gtmaddons.stats.FightStats;
@@ -11,14 +14,13 @@ import com.example.gtmaddons.stats.PlayerStats.GunRow;
 import com.example.gtmaddons.stats.PlayerStats.PlayerDetail;
 import com.example.gtmaddons.stats.PlayerStats.SwapRow;
 import com.example.gtmaddons.stats.StatsClient;
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.ConfirmScreen;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.screen.ScreenTexts;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,7 +37,7 @@ import java.util.function.Consumer;
  *
  * Click a row for the ratings page behind it. Closes if you get combat-tagged.
  */
-public class FightLogScreen extends Screen {
+public class FightLogScreen extends ModScreen {
 
 	private static final int ROW = 13;
 	private static final int TABLE_WIDTH = 390;
@@ -57,7 +59,7 @@ public class FightLogScreen extends Screen {
 
 	public FightLogScreen(Screen parent, FightHistory history, PvpCategory filter, boolean individualGuns,
 			StatsClient stats, Consumer<FightHistory> onHistoryChanged) {
-		super(Text.literal("Fight log - " + history.name()));
+		super(Component.literal("Fight log - " + history.name()));
 		this.parent = parent;
 		this.history = history;
 		this.filter = filter;
@@ -89,36 +91,36 @@ public class FightLogScreen extends Screen {
 		int total = (categories.length + 1) * (chip + gap) - gap;
 		int x = (width - total) / 2, y = 22;
 
-		ButtonWidget all = addDrawableChild(ButtonWidget.builder(Text.literal("All"), b -> setFilter(null))
-				.dimensions(x, y, chip, 20).build());
+		Button all = addRenderableWidget(ThemedButton.create(Component.literal("All"), b -> setFilter(null))
+				.bounds(x, y, chip, 20).build());
 		all.active = filter != null;
 		x += chip + gap;
 		for (PvpCategory category : categories) {
-			ButtonWidget button = addDrawableChild(ButtonWidget.builder(Text.literal(category.label), b -> setFilter(category))
-					.dimensions(x, y, chip, 20).build());
+			Button button = addRenderableWidget(ThemedButton.create(Component.literal(category.label), b -> setFilter(category))
+					.bounds(x, y, chip, 20).build());
 			button.active = filter != category;
 			x += chip + gap;
 		}
 
 
-		addDrawableChild(ButtonWidget.builder(ScreenTexts.BACK, b -> close())
-				.dimensions(width / 2 - 75, height - 28, 150, 20).build());
+		addRenderableWidget(ThemedButton.create(CommonComponents.GUI_BACK, b -> onClose())
+				.bounds(width / 2 - 75, height - 28, 150, 20).build());
 	}
 
 	private void setFilter(PvpCategory category) {
 		filter = category;
 		rebuild();
-		clearAndInit();
+		rebuildWidgets();
 	}
 
 	@Override
-	public void close() {
-		client.setScreen(parent);
+	public void onClose() {
+		Mc.setScreen(minecraft, parent);
 	}
 
 	@Override
 	public void tick() {
-		CombatLock.closeIfInCombat(client);
+		CombatLock.closeIfInCombat(minecraft);
 	}
 
 	/** In admin mode there is a red X column after the ratings. */
@@ -146,21 +148,21 @@ public class FightLogScreen extends Screen {
 	}
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
+	public void draw(Gfx context, int mouseX, int mouseY, float deltaTicks) {
 		context.fill(0, 0, width, height, Ui.PAGE);
-		super.render(context, mouseX, mouseY, deltaTicks);
-		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 8, Ui.TEXT);
+		super.draw(context, mouseX, mouseY, deltaTicks);
+		context.centeredText(font, title, width / 2, 8, Ui.TEXT);
 
 		int x0 = left();
-		Ui.textRight(context, textRenderer, "#", x0 + 20, TABLE_TOP - 12, Ui.MUTED);
-		context.drawTextWithShadow(textRenderer, "When", x0 + 26, TABLE_TOP - 12, Ui.MUTED);
-		context.drawTextWithShadow(textRenderer, "Opponent", x0 + 88, TABLE_TOP - 12, Ui.MUTED);
-		context.drawTextWithShadow(textRenderer, "W/L", x0 + 166, TABLE_TOP - 12, Ui.MUTED);
-		Ui.textRight(context, textRenderer, "Time", x0 + 220, TABLE_TOP - 12, Ui.MUTED);
-		context.drawTextWithShadow(textRenderer, "PvP", x0 + 228, TABLE_TOP - 12, Ui.MUTED);
-		Ui.textRight(context, textRenderer, "Aim", x0 + 300, TABLE_TOP - 12, Ui.MUTED);
-		Ui.textRight(context, textRenderer, "Mv", x0 + 338, TABLE_TOP - 12, Ui.MUTED);
-		Ui.textRight(context, textRenderer, "Overall", x0 + 384, TABLE_TOP - 12, Ui.MUTED);
+		Ui.textRight(context, font, "#", x0 + 20, TABLE_TOP - 12, Ui.MUTED);
+		context.text(font, "When", x0 + 26, TABLE_TOP - 12, Ui.MUTED);
+		context.text(font, "Opponent", x0 + 88, TABLE_TOP - 12, Ui.MUTED);
+		context.text(font, "W/L", x0 + 166, TABLE_TOP - 12, Ui.MUTED);
+		Ui.textRight(context, font, "Time", x0 + 220, TABLE_TOP - 12, Ui.MUTED);
+		context.text(font, "PvP", x0 + 228, TABLE_TOP - 12, Ui.MUTED);
+		Ui.textRight(context, font, "Aim", x0 + 300, TABLE_TOP - 12, Ui.MUTED);
+		Ui.textRight(context, font, "Mv", x0 + 338, TABLE_TOP - 12, Ui.MUTED);
+		Ui.textRight(context, font, "Overall", x0 + 384, TABLE_TOP - 12, Ui.MUTED);
 
 		int visible = visibleHeight();
 		int full = rows.size() * ROW;
@@ -182,40 +184,40 @@ public class FightLogScreen extends Screen {
 			context.fill(x0 + tableWidth() + 4, barY, x0 + tableWidth() + 6, barY + barH, Ui.MUTED);
 		}
 		if (rows.isEmpty()) {
-			context.drawCenteredTextWithShadow(textRenderer, Text.literal("No fights recorded yet."), width / 2, TABLE_TOP + 10, Ui.MUTED);
+			context.centeredText(font, Component.literal("No fights recorded yet."), width / 2, TABLE_TOP + 10, Ui.MUTED);
 		}
 
-		if (notice != null) context.drawCenteredTextWithShadow(textRenderer, Text.literal(notice), width / 2, height - 40, notice.startsWith("Couldn") ? Ui.BAD : Ui.GOOD);
-		else context.drawCenteredTextWithShadow(textRenderer, Text.literal(footer(hover)), width / 2, height - 40, Ui.MUTED);
+		if (notice != null) context.centeredText(font, Component.literal(notice), width / 2, height - 40, notice.startsWith("Couldn") ? Ui.BAD : Ui.GOOD);
+		else context.centeredText(font, Component.literal(footer(hover)), width / 2, height - 40, Ui.MUTED);
 	}
 
-	private void drawRow(DrawContext context, Row row, int x0, int y, boolean hovered) {
+	private void drawRow(Gfx context, Row row, int x0, int y, boolean hovered) {
 		FightData f = row.fight();
 		if (hovered) context.fill(x0 - 2, y - 1, x0 + tableWidth() + 2, y + ROW - 1, 0x40FFFFFF);
 		PvpCategory category = PvpCategory.fromName(f.category());
 		int ty = y + 1;
 
-		Ui.textRight(context, textRenderer, String.valueOf(row.index() + 1), x0 + 20, ty, Ui.MUTED);
-		context.drawTextWithShadow(textRenderer, Format.time(f.endedAt()), x0 + 26, ty, Ui.LABEL);
-		context.drawTextWithShadow(textRenderer, Ui.fit(textRenderer, f.opponent() != null ? f.opponent() : "(unknown)", 72), x0 + 88, ty,
+		Ui.textRight(context, font, String.valueOf(row.index() + 1), x0 + 20, ty, Ui.MUTED);
+		context.text(font, Format.time(f.endedAt()), x0 + 26, ty, Ui.LABEL);
+		context.text(font, Ui.fit(font, f.opponent() != null ? f.opponent() : "(unknown)", 72), x0 + 88, ty,
 				f.opponent() != null ? Ui.TEXT : Ui.MUTED);
-		context.drawTextWithShadow(textRenderer, f.won() ? "W" : "L", x0 + 170, ty, f.won() ? Ui.GOOD : Ui.BAD);
-		Ui.textRight(context, textRenderer, length(f), x0 + 220, ty, Ui.LABEL);
-		context.drawTextWithShadow(textRenderer, category != null ? category.label : "?", x0 + 228, ty,
+		context.text(font, f.won() ? "W" : "L", x0 + 170, ty, f.won() ? Ui.GOOD : Ui.BAD);
+		Ui.textRight(context, font, length(f), x0 + 220, ty, Ui.LABEL);
+		context.text(font, category != null ? category.label : "?", x0 + 228, ty,
 				category != null ? Ui.accent(category) : Ui.MUTED);
 
 		Ratings.Result r = row.ratings();
 		rating(context, r != null ? r.aim() : null, r != null && r.aimAssumed(), x0 + 300, ty);
 		rating(context, r != null ? r.movement() : null, r != null && r.movementAssumed(), x0 + 338, ty);
 		rating(context, r != null ? r.overall() : null, r != null && r.aimAssumed() && r.movementAssumed(), x0 + 384, ty);
-		if (AdminMode.isOn()) context.drawTextWithShadow(textRenderer, Text.literal("\u2716").formatted(Formatting.RED), x0 + TABLE_WIDTH + 4, ty, Ui.BAD);
+		if (AdminMode.isOn()) context.text(font, Component.literal("\u2716").withStyle(ChatFormatting.RED), x0 + TABLE_WIDTH + 4, ty, Ui.BAD);
 	}
 
 	/** assumed: no data for it in the fight, so it is shown as an estimate (dim, with a ~). */
-	private void rating(DrawContext context, Double value, boolean assumed, int right, int y) {
-		if (value == null) Ui.textRight(context, textRenderer, "-", right, y, Ui.MUTED);
-		else if (assumed) Ui.textRight(context, textRenderer, "~" + Math.round(value), right, y, Ui.MUTED);
-		else Ui.textRight(context, textRenderer, String.valueOf(Math.round(value)), right, y, Ui.scoreColor(value));
+	private void rating(Gfx context, Double value, boolean assumed, int right, int y) {
+		if (value == null) Ui.textRight(context, font, "-", right, y, Ui.MUTED);
+		else if (assumed) Ui.textRight(context, font, "~" + Math.round(value), right, y, Ui.MUTED);
+		else Ui.textRight(context, font, String.valueOf(Math.round(value)), right, y, Ui.scoreColor(value));
 	}
 
 	private static String length(FightData f) {
@@ -241,7 +243,7 @@ public class FightLogScreen extends Screen {
 	}
 
 	@Override
-	public boolean mouseClicked(Click click, boolean doubled) {
+	public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
 		if (super.mouseClicked(click, doubled)) return true;
 		if (click.button() != 0) return false;
 		int i = rowAt(click.x(), click.y());
@@ -267,18 +269,18 @@ public class FightLogScreen extends Screen {
 			return;
 		}
 		String vs = fight.opponent() != null ? " vs " + fight.opponent() : "";
-		client.setScreen(new ConfirmScreen(yes -> {
-			client.setScreen(this);
+		Mc.setScreen(minecraft, new ConfirmScreen(yes -> {
+			Mc.setScreen(minecraft, this);
 			if (yes) delete(fight);
 		},
-				Text.literal("Delete this fight?").formatted(Formatting.RED),
-				Text.literal("This deletes the " + (fight.won() ? "win" : "loss") + vs + " (" + Format.time(fight.endedAt()) + ") from "
+				Component.literal("Delete this fight?").withStyle(ChatFormatting.RED),
+				Component.literal("This deletes the " + (fight.won() ? "win" : "loss") + vs + " (" + Format.time(fight.endedAt()) + ") from "
 						+ history.name() + "'s stats on the server: its swaps, shots and combos too.\n\nIt cannot be undone.")));
 	}
 
 	private void delete(FightData fight) {
 		notice = "Deleting...";
-		stats.deleteFight(history.uuid(), fight.fightKey()).whenComplete((result, error) -> client.execute(() -> {
+		stats.deleteFight(history.uuid(), fight.fightKey()).whenComplete((result, error) -> minecraft.execute(() -> {
 			if (error != null) {
 				notice = "Couldn't delete: " + Format.error(error);
 				return;
@@ -299,7 +301,7 @@ public class FightLogScreen extends Screen {
 		if (category == null) return;
 		PlayerDetail detail = FightStats.detail(history, List.of(fight));
 		String vs = fight.opponent() != null ? " vs " + fight.opponent() : "";
-		Text subtitle = Text.literal((fight.won() ? "Won" : "Lost") + vs + " (" + Format.time(fight.endedAt()) + ")  ·  this fight alone");
-		client.setScreen(new InsightScreen(this, detail, category, Insight.RATING, subtitle, individualGuns));
+		Component subtitle = Component.literal((fight.won() ? "Won" : "Lost") + vs + " (" + Format.time(fight.endedAt()) + ")  ·  this fight alone");
+		Mc.setScreen(minecraft, new InsightScreen(this, detail, category, Insight.RATING, subtitle, individualGuns));
 	}
 }

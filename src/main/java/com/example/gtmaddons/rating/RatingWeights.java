@@ -227,10 +227,6 @@ public final class RatingWeights {
 	public static final int MIN_SWAPS = 3;
 	public static final int FULL_SWAPS = 5;
 
-	/** The average swap time (ms) that scores 100 and the one that scores 0 (the ends of SWAP_SPEED_TABLE), for colouring times on screen. */
-	public static final double BEST_SWAP_MS = 100;
-	public static final double WORST_SWAP_MS = 700;
-
 	/** Average swap time in ms -> speed score. Faster than the first row scores its score, slower than the last row scores 0. */
 	private static final double[][] SWAP_SPEED_TABLE = {
 			{ 100, 100 }, { 125, 98 }, { 150, 92 }, { 175, 84 }, { 200, 75 }, { 225, 70 }, { 250, 65 },

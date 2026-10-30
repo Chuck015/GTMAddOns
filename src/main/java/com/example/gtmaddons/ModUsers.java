@@ -1,8 +1,9 @@
 package com.example.gtmaddons;
 
 import com.example.gtmaddons.stats.StatsClient;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 
 import java.util.UUID;
 
@@ -23,12 +24,12 @@ public final class ModUsers {
 	private static long nextPruneMillis = 0L;
 
 	/** Every couple of seconds: tell the stats client who is on the server (it checks new players once, see StatsClient.updateOnline). */
-	public static void onFrame(net.minecraft.client.MinecraftClient client) {
+	public static void onFrame(Minecraft client) {
 		if (stats == null) return;
 		long now = System.currentTimeMillis();
 		if (now < nextPruneMillis) return;
 		nextPruneMillis = now + 2000L;
-		stats.updateOnline(client.getNetworkHandler() != null ? client.getNetworkHandler().getPlayerUuids() : java.util.List.<java.util.UUID>of());
+		stats.updateOnline(client.getConnection() != null ? client.getConnection().getOnlinePlayerIds() : java.util.List.<java.util.UUID>of());
 	}
 
 	public static void init(StatsClient statsClient, Settings modSettings) {
@@ -37,8 +38,8 @@ public final class ModUsers {
 	}
 
 	/** The name with the icon after it if this player runs the mod (and the setting is on); the same name otherwise. */
-	public static Text decorate(Text name, UUID player) {
+	public static Component decorate(Component name, UUID player) {
 		if (stats == null || settings == null || !settings.showModUsers || player == null || !stats.isModUser(player)) return name;
-		return name.copy().append(Text.literal(ICON).formatted(Formatting.AQUA));
+		return name.copy().append(Component.literal(ICON).withStyle(ChatFormatting.AQUA));
 	}
 }

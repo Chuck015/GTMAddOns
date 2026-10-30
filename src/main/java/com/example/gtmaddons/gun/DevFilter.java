@@ -20,6 +20,7 @@ public enum DevFilter {
 	MESSAGES(Group.GENERAL, "Chat & action bar", "Every chat and action-bar message, spelled out with fonts"),
 	COOLDOWNS(Group.GENERAL, "Item cooldowns", "The server setting a weapon's cooldown (the sweep over the hotbar item)"),
 	COMBOS(Group.JP, "Melee combos", "Finished combos and melee exchange summaries"),
+	COMBO_TIMING(Group.JP, "Combo timing", "Each melee hit, blank swing and weapon cooldown: the server's time left against the combo timer's, the time since your last hit and the clicks between, to work out GTM's combo rules"),
 	MELEE_DAMAGE(Group.JP, "Melee damage", "Each melee hit: damage actually dealt against what vanilla would deal (attack damage, charge, armor), flagged LOW DAMAGE when far under; plus the weapon's attribute modifiers and attack damage changes"),
 	NET_LAUNCHER(Group.WING, "Net Launcher", "Each Net Launcher shot: counted as a hit or a miss and why (who was hit, wingsuit or not, timing), then a one-second follow-up on the target and the cobwebs around it"),
 	PERFORMANCE(Group.GENERAL, "Performance", "Every 10 s: how much time the mod itself takes per frame (frame hooks and HUD), and the dev tools' own cost; chat only if it is 3% of a frame or more"),

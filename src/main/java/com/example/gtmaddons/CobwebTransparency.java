@@ -1,8 +1,8 @@
 package com.example.gtmaddons;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.texture.NativeImage;
-import net.minecraft.util.Identifier;
+import com.mojang.blaze3d.platform.NativeImage;
+import net.minecraft.client.Minecraft;
+import net.minecraft.resources.Identifier;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,7 +44,7 @@ public final class CobwebTransparency {
 		List<int[]> opaque = new ArrayList<>();
 		for (int y = 0; y < image.getHeight(); y++) {
 			for (int x = 0; x < image.getWidth(); x++) {
-				if ((image.getColorArgb(x, y) >>> 24) != 0) opaque.add(new int[] { x, y });
+				if ((image.getPixel(x, y) >>> 24) != 0) opaque.add(new int[] { x, y });
 			}
 		}
 		Collections.shuffle(opaque, new Random(0x6C0BEBL));
@@ -52,12 +52,12 @@ public final class CobwebTransparency {
 		for (int i = 0; i < remove; i++) {
 			int x = opaque.get(i)[0], y = opaque.get(i)[1];
 			int argb = 0;
-			image.setColorArgb(x, y, argb);
+			image.setPixel(x, y, argb);
 		}
 	}
 
 	/** Reloads resources if the setting no longer matches the loaded texture. */
 	public static void reloadIfChanged() {
-		if (settings != null && settings.cobwebTransparency != applied) MinecraftClient.getInstance().reloadResources();
+		if (settings != null && settings.cobwebTransparency != applied) Minecraft.getInstance().reloadResourcePacks();
 	}
 }

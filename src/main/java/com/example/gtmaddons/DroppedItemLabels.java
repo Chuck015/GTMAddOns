@@ -1,13 +1,13 @@
 package com.example.gtmaddons;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.ItemEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.text.Text;
-import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.RaycastContext;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -33,7 +33,7 @@ public final class DroppedItemLabels {
 
 	private static Settings settings;
 	/** Entity id -> label, for the items in plain view at the last check. */
-	private static final Map<Integer, Text> visible = new HashMap<>();
+	private static final Map<Integer, Component> visible = new HashMap<>();
 	private static long lastCheckNanos = 0L;
 
 	private DroppedItemLabels() {}
@@ -43,12 +43,12 @@ public final class DroppedItemLabels {
 	}
 
 	/** The label to draw above this item, or null (setting off, too far, or not in plain view). */
-	public static Text labelFor(ItemEntity item) {
+	public static Component labelFor(ItemEntity item) {
 		return visible.isEmpty() ? null : visible.get(item.getId());
 	}
 
-	public static void onFrame(MinecraftClient client) {
-		if (settings == null || !settings.droppedItemNames || client.world == null || client.player == null) {
+	public static void onFrame(Minecraft client) {
+		if (settings == null || !settings.droppedItemNames || client.level == null || client.player == null) {
 			visible.clear();
 			return;
 		}
@@ -57,21 +57,21 @@ public final class DroppedItemLabels {
 		lastCheckNanos = now;
 		visible.clear();
 
-		Vec3d eyes = client.player.getCameraPosVec(1.0f);
-		Box around = client.player.getBoundingBox().expand(RANGE);
-		for (ItemEntity item : client.world.getEntitiesByClass(ItemEntity.class, around, e -> true)) {
-			ItemStack stack = item.getStack();
-			if (stack.isEmpty() || item.squaredDistanceTo(client.player) > RANGE * RANGE) continue;
-			Vec3d body = new Vec3d(item.getX(), item.getY() + item.getHeight() / 2.0, item.getZ());
-			Vec3d label = new Vec3d(item.getX(), item.getY() + item.getHeight() + LABEL_RISE, item.getZ());
+		Vec3 eyes = client.player.getEyePosition(1.0f);
+		AABB around = client.player.getBoundingBox().inflate(RANGE);
+		for (ItemEntity item : client.level.getEntitiesOfClass(ItemEntity.class, around, e -> true)) {
+			ItemStack stack = item.getItem();
+			if (stack.isEmpty() || item.distanceToSqr(client.player) > RANGE * RANGE) continue;
+			Vec3 body = new Vec3(item.getX(), item.getY() + item.getBbHeight() / 2.0, item.getZ());
+			Vec3 label = new Vec3(item.getX(), item.getY() + item.getBbHeight() + LABEL_RISE, item.getZ());
 			if (!clear(client, eyes, body) || !clear(client, eyes, label)) continue;
-			visible.put(item.getId(), stack.getCount() > 1 ? stack.getName().copy().append(" x" + stack.getCount()) : stack.getName());
+			visible.put(item.getId(), stack.getCount() > 1 ? stack.getHoverName().copy().append(" x" + stack.getCount()) : stack.getHoverName());
 		}
 	}
 
 	/** True when no block with a collision shape is between the two points. */
-	private static boolean clear(MinecraftClient client, Vec3d from, Vec3d to) {
-		return client.world.raycast(new RaycastContext(from, to, RaycastContext.ShapeType.COLLIDER, RaycastContext.FluidHandling.NONE, client.player))
+	private static boolean clear(Minecraft client, Vec3 from, Vec3 to) {
+		return client.level.clip(new ClipContext(from, to, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, client.player))
 				.getType() == HitResult.Type.MISS;
 	}
 }

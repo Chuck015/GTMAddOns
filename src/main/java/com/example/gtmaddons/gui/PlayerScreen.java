@@ -3,21 +3,23 @@ package com.example.gtmaddons.gui;
 import com.example.gtmaddons.AdminMode;
 import com.example.gtmaddons.GTMAddOnsClient;
 import com.example.gtmaddons.PvpCategory;
+import com.example.gtmaddons.compat.Gfx;
+import com.example.gtmaddons.compat.Mc;
+import com.example.gtmaddons.compat.ModScreen;
 import com.example.gtmaddons.gui.InsightScreen.Insight;
 import com.example.gtmaddons.stats.FightFilter;
 import com.example.gtmaddons.stats.FightStats;
 import com.example.gtmaddons.stats.PlayerStats.FightHistory;
 import com.example.gtmaddons.stats.PlayerStats.PlayerDetail;
 import com.example.gtmaddons.stats.StatsClient;
-import net.minecraft.client.gui.Click;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.ConfirmScreen;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.screen.ScreenTexts;
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.ConfirmScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -39,7 +41,7 @@ import java.util.Map;
  * Opens on the tab that was open last (for Personal Stats, mod != null,
  * saved in Settings). Closes itself if you get combat-tagged.
  */
-public class PlayerScreen extends Screen {
+public class PlayerScreen extends ModScreen {
 
 	private static final int TABS_Y = 44;
 	private static final int TAB_WIDTH = 60;
@@ -98,7 +100,7 @@ public class PlayerScreen extends Screen {
 	 * this is your own Personal Stats page.
 	 */
 	public PlayerScreen(Screen parent, PlayerDetail detail, StatsClient stats, GTMAddOnsClient mod) {
-		super(Text.literal(mod != null ? "Personal Stats - " + detail.name() : detail.name()));
+		super(Component.literal(mod != null ? "Personal Stats - " + detail.name() : detail.name()));
 		this.parent = parent;
 		this.stats = stats;
 		this.mod = mod;
@@ -121,7 +123,7 @@ public class PlayerScreen extends Screen {
 
 	@Override
 	public void tick() {
-		CombatLock.closeIfInCombat(client);
+		CombatLock.closeIfInCombat(minecraft);
 		if (needsRefresh) {
 			needsRefresh = false;
 			show();
@@ -141,20 +143,20 @@ public class PlayerScreen extends Screen {
 		int tabsLeft = tabsLeft();
 		for (int i = 0; i < categories.length; i++) {
 			PvpCategory category = categories[i];
-			ButtonWidget tab = addDrawableChild(ButtonWidget.builder(Text.literal(category.label), b -> selectTab(category))
-					.dimensions(tabsLeft + i * (TAB_WIDTH + TAB_GAP), TABS_Y, TAB_WIDTH, 20).build());
+			Button tab = addRenderableWidget(ThemedButton.create(Component.literal(category.label), b -> selectTab(category))
+					.bounds(tabsLeft + i * (TAB_WIDTH + TAB_GAP), TABS_Y, TAB_WIDTH, 20).build());
 			tab.active = category != selected;
 		}
-		addDrawableChild(ButtonWidget.builder(ScreenTexts.BACK, b -> close())
-				.dimensions(width / 2 - 75, height - 28, 150, 20).build());
+		addRenderableWidget(ThemedButton.create(CommonComponents.GUI_BACK, b -> onClose())
+				.bounds(width / 2 - 75, height - 28, 150, 20).build());
 		GTMAddOnsClient flagsMod = mod != null ? mod : adminMod;
 		if (AdminMode.isOn() && flagsMod != null) {
-			addDrawableChild(ButtonWidget.builder(Text.literal("Flags"), b -> client.setScreen(new AdminPlayerInfoScreen(this, flagsMod, detail.name())))
-					.dimensions(width - 182, 4, 56, 16).build());
+			addRenderableWidget(ThemedButton.create(Component.literal("Stat flags"), b -> Mc.setScreen(minecraft, new AdminPlayerInfoScreen(this, flagsMod, detail.name())))
+					.bounds(width - 196, 4, 70, 16).build());
 		}
 		if (AdminMode.isOn()) {
-			addDrawableChild(ButtonWidget.builder(Text.literal("Admin: delete data").formatted(Formatting.RED), b -> confirmDeleteAll())
-					.dimensions(width - 122, 4, 118, 16)
+			addRenderableWidget(ThemedButton.create(Component.literal("Admin: delete data").withStyle(ChatFormatting.RED), b -> confirmDeleteAll())
+					.bounds(width - 122, 4, 118, 16)
 					.build());
 		}
 	}
@@ -162,18 +164,18 @@ public class PlayerScreen extends Screen {
 	// ---- Admin mode ----
 
 	private void confirmDeleteAll() {
-		client.setScreen(new ConfirmScreen(yes -> {
-			client.setScreen(this);
+		Mc.setScreen(minecraft, new ConfirmScreen(yes -> {
+			Mc.setScreen(minecraft, this);
 			if (yes) deleteAll();
 		},
-				Text.literal("Delete " + detail.name() + "'s data?").formatted(Formatting.RED),
-				Text.literal("This deletes ALL of " + detail.name() + "'s stats from the server: every fight, swap, gun and combo total, in every PvP.\n\nIt cannot be undone.")));
+				Component.literal("Delete " + detail.name() + "'s data?").withStyle(ChatFormatting.RED),
+				Component.literal("This deletes ALL of " + detail.name() + "'s stats from the server: every fight, swap, gun and combo total, in every PvP.\n\nIt cannot be undone.")));
 	}
 
 	private void deleteAll() {
 		String name = detail.name();
 		status = "Deleting " + name + "'s data...";
-		stats.deletePlayerData(uuid).whenComplete((result, error) -> client.execute(() -> {
+		stats.deletePlayerData(uuid).whenComplete((result, error) -> minecraft.execute(() -> {
 			if (error != null) {
 				status = "Couldn't delete: " + Format.error(error);
 				return;
@@ -206,29 +208,29 @@ public class PlayerScreen extends Screen {
 
 		for (int i = 0; i < FIGHT_VIEWS.length; i++) {
 			int fights = FIGHT_VIEWS[i];
-			ButtonWidget view = addDrawableChild(ButtonWidget.builder(Text.literal(fights + " fights"), b -> selectView(fights))
-					.dimensions(x + i * (viewWidth + gap), y, viewWidth, 20)
+			Button view = addRenderableWidget(ThemedButton.create(Component.literal(fights + " fights"), b -> selectView(fights))
+					.bounds(x + i * (viewWidth + gap), y, viewWidth, 20)
 					.build());
 			view.active = filter != null || viewFights != fights;
 		}
-		addDrawableChild(ButtonWidget.builder(Text.literal(filter != null ? "Filter: ON" : "Filter..."), b -> withHistory(this::openFilter))
-				.dimensions(x + rowWidth - filterWidth, y, filterWidth, 20)
+		addRenderableWidget(ThemedButton.create(Component.literal(filter != null ? "Filter: ON" : "Filter..."), b -> withHistory(this::openFilter))
+				.bounds(x + rowWidth - filterWidth, y, filterWidth, 20)
 				.build());
 
 		y = height - 52;
 		int logWidth = 80, gunsWidth = 140, rawWidth = 80;
 		int row2 = logWidth + gap + gunsWidth + gap + rawWidth;
 		x = (width - row2) / 2;
-		addDrawableChild(ButtonWidget.builder(Text.literal("Fight log"), b -> withHistory(this::openLog))
-				.dimensions(x, y, logWidth, 20)
+		addRenderableWidget(ThemedButton.create(Component.literal("Fight log"), b -> withHistory(this::openLog))
+				.bounds(x, y, logWidth, 20)
 				.build());
-		addDrawableChild(ButtonWidget.builder(Text.literal("Individual gun stats: " + (showIndividualGuns ? "ON" : "OFF")), b -> {
+		addRenderableWidget(ThemedButton.create(Component.literal("Individual gun stats: " + (showIndividualGuns ? "ON" : "OFF")), b -> {
 			showIndividualGuns = !showIndividualGuns;
-			clearAndInit();
-		}).dimensions(x + logWidth + gap, y, gunsWidth, 20)
+			rebuildWidgets();
+		}).bounds(x + logWidth + gap, y, gunsWidth, 20)
 				.build());
-		addDrawableChild(ButtonWidget.builder(Text.literal("Raw info"), b -> client.setScreen(new RawInfoScreen(this, stats, uuid, detail.name())))
-				.dimensions(x + logWidth + gap + gunsWidth + gap, y, rawWidth, 20)
+		addRenderableWidget(ThemedButton.create(Component.literal("Raw info"), b -> Mc.setScreen(minecraft, new RawInfoScreen(this, stats, uuid, detail.name())))
+				.bounds(x + logWidth + gap + gunsWidth + gap, y, rawWidth, 20)
 				.build());
 	}
 
@@ -248,8 +250,8 @@ public class PlayerScreen extends Screen {
 			return;
 		}
 		status = "Loading fights...";
-		stats.fetchFights(uuid).whenComplete((result, error) -> client.execute(() -> {
-			if (client.currentScreen != this) return;
+		stats.fetchFights(uuid).whenComplete((result, error) -> minecraft.execute(() -> {
+			if (Mc.screen(minecraft) != this) return;
 			if (error != null) {
 				String why = Format.error(error);
 				status = "Couldn't load fights: " + why + (why.contains("404") ? " (the stats server needs updating)" : "");
@@ -263,7 +265,7 @@ public class PlayerScreen extends Screen {
 
 	private void openFilter() {
 		FightFilter current = filter != null ? filter : FightFilter.last(viewFights > 0 ? viewFights : FIGHT_VIEWS[0]);
-		client.setScreen(new FightFilterScreen(this, selected.label, FightFilter.opponents(history.fights(), selected), current,
+		Mc.setScreen(minecraft, new FightFilterScreen(this, selected.label, FightFilter.opponents(history.fights(), selected), current,
 				picked -> picked.apply(history.fights(), selected).size(), this::applyFilter));
 	}
 
@@ -274,7 +276,7 @@ public class PlayerScreen extends Screen {
 	}
 
 	private void openLog() {
-		client.setScreen(new FightLogScreen(this, history, selected, showIndividualGuns, stats, updated -> {
+		Mc.setScreen(minecraft, new FightLogScreen(this, history, selected, showIndividualGuns, stats, updated -> {
 			// An admin deleted a fight: what's on this page is out of date.
 			history = updated;
 			views.clear();
@@ -301,7 +303,7 @@ public class PlayerScreen extends Screen {
 			detail = FightStats.detail(history, filter.apply(history.fights(), selected));
 			shownKey = key(selected, viewFights);
 			status = null;
-			clearAndInit();
+			rebuildWidgets();
 			return;
 		}
 		String wanted = key(selected, viewFights);
@@ -310,15 +312,15 @@ public class PlayerScreen extends Screen {
 			detail = loaded;
 			shownKey = wanted;
 			status = null;
-			clearAndInit();
+			rebuildWidgets();
 			return;
 		}
 		int fights = viewFights;
 		PvpCategory category = selected;
 		status = "Loading the last " + fights + " " + category.label + " fights...";
-		clearAndInit();
-		stats.fetchPlayer(uuid, fights, category).whenComplete((result, error) -> client.execute(() -> {
-			if (client.currentScreen != this) return;
+		rebuildWidgets();
+		stats.fetchPlayer(uuid, fights, category).whenComplete((result, error) -> minecraft.execute(() -> {
+			if (Mc.screen(minecraft) != this) return;
 			boolean stillWanted = key(selected, viewFights).equals(wanted);
 			if (error != null) {
 				if (stillWanted) status = "Couldn't load the last " + fights + " " + category.label + " fights: " + Format.error(error);
@@ -340,28 +342,28 @@ public class PlayerScreen extends Screen {
 	}
 
 	@Override
-	public void close() {
-		client.setScreen(parent);
+	public void onClose() {
+		Mc.setScreen(minecraft, parent);
 	}
 
 	// ---- Drawing ----
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
+	public void draw(Gfx context, int mouseX, int mouseY, float deltaTicks) {
 		// A dark page behind everything, like csstats.
 		context.fill(0, 0, width, height, Ui.PAGE);
-		super.render(context, mouseX, mouseY, deltaTicks);
-		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 8, Ui.TEXT);
+		super.draw(context, mouseX, mouseY, deltaTicks);
+		context.centeredText(font, title, width / 2, 8, Ui.TEXT);
 
 		// Underline the selected tab in its category's color.
 		int tabX = tabsLeft() + selected.ordinal() * (TAB_WIDTH + TAB_GAP);
 		context.fill(tabX + 2, TABS_Y + 21, tabX + TAB_WIDTH - 2, TABS_Y + 23, Ui.accent(selected));
 
 		hovered = null;
-		if (status != null) context.drawCenteredTextWithShadow(textRenderer, Text.literal(status), width / 2, 19, Ui.OK);
+		if (status != null) context.centeredText(font, Component.literal(status), width / 2, 19, Ui.OK);
 		// Another tab's (or fight count's) stats never show while the picked one loads.
 		if (!showingPicked()) return;
-		if (status == null) context.drawCenteredTextWithShadow(textRenderer, subtitle(), width / 2, 19, Ui.MUTED);
+		if (status == null) context.centeredText(font, subtitle(), width / 2, 19, Ui.MUTED);
 		drawOverview(context, mouseX, mouseY);
 	}
 
@@ -370,7 +372,7 @@ public class PlayerScreen extends Screen {
 	 * doesn't fit above the buttons it scrolls with the mouse wheel, with a
 	 * thin scrollbar on the right. Remembers which card the mouse is on.
 	 */
-	private void drawOverview(DrawContext context, int mouseX, int mouseY) {
+	private void drawOverview(Gfx context, int mouseX, int mouseY) {
 		int top = TABS_Y + 28, bottom = height - 82;
 		int w = Math.min(width - 16, 660), x = (width - w) / 2;
 		int visible = bottom - top, full = StatsOverview.height();
@@ -378,10 +380,10 @@ public class PlayerScreen extends Screen {
 		boolean mouseIn = mouseY >= top && mouseY < bottom;
 
 		context.enableScissor(x - 1, top, x + w + 1, bottom);
-		var matrices = context.getMatrices();
+		var matrices = context.pose();
 		matrices.pushMatrix();
 		matrices.translate(0, -scroll);
-		hovered = StatsOverview.draw(context, textRenderer, detail, selected, showIndividualGuns,
+		hovered = StatsOverview.draw(context, font, detail, selected, showIndividualGuns,
 				x, top, w, mouseX, mouseIn ? mouseY + scroll : Integer.MIN_VALUE);
 		matrices.popMatrix();
 		context.disableScissor();
@@ -396,10 +398,10 @@ public class PlayerScreen extends Screen {
 
 	/** Clicking a card opens its insight page. */
 	@Override
-	public boolean mouseClicked(Click click, boolean doubled) {
+	public boolean mouseClicked(MouseButtonEvent click, boolean doubled) {
 		if (super.mouseClicked(click, doubled)) return true;
 		if (click.button() != 0 || hovered == null || !showingPicked()) return false;
-		client.setScreen(new InsightScreen(this, detail, selected, hovered, subtitle(), showIndividualGuns));
+		Mc.setScreen(minecraft, new InsightScreen(this, detail, selected, hovered, subtitle(), showIndividualGuns));
 		return true;
 	}
 
@@ -413,27 +415,27 @@ public class PlayerScreen extends Screen {
 	 * Which fights these stats are from, and how they went - the K/D is one
 	 * of the core stats, e.g. "Last 25 JP fights · K/D 1.78 · 16 kills · 9 deaths".
 	 */
-	private Text subtitle() {
+	private Component subtitle() {
 		String opponents = filter != null && history != null ? filter.describeOpponents(history.fights()) : "";
 		if (detail.fights() == 0) {
-			return Text.literal(filter != null
+			return Component.literal(filter != null
 					? "No " + selected.label + " fights match" + (opponents.isEmpty() ? "" : " " + opponents)
 					: "No " + selected.label + " fights yet");
 		}
-		MutableText out;
+		MutableComponent out;
 		if (filter != null) {
 			// A custom selection: how many of up to how many, and against whom.
-			out = Text.literal(detail.fights() + " " + selected.label + (detail.fights() == 1 ? " fight" : " fights")
+			out = Component.literal(detail.fights() + " " + selected.label + (detail.fights() == 1 ? " fight" : " fights")
 					+ (opponents.isEmpty() ? "" : " " + opponents) + " (max " + filter.limit() + ")");
 		} else {
-			out = Text.literal(detail.fights() == 1
+			out = Component.literal(detail.fights() == 1
 					? "Last " + selected.label + " fight"
 					: "Last " + detail.fights() + " " + selected.label + " fights");
 		}
 		double kd = kd(detail.kills(), detail.deaths());
-		out.append(Text.literal("  ·  "));
-		out.append(Text.literal(String.format("K/D %.2f", kd)).withColor(kdColor(kd)).formatted(Formatting.BOLD));
-		out.append(Text.literal(String.format("  ·  %d %s  ·  %d %s", detail.kills(), detail.kills() == 1 ? "kill" : "kills",
+		out.append(Component.literal("  ·  "));
+		out.append(Component.literal(String.format("K/D %.2f", kd)).withColor(kdColor(kd)).withStyle(ChatFormatting.BOLD));
+		out.append(Component.literal(String.format("  ·  %d %s  ·  %d %s", detail.kills(), detail.kills() == 1 ? "kill" : "kills",
 				detail.deaths(), detail.deaths() == 1 ? "death" : "deaths")));
 		return out;
 	}

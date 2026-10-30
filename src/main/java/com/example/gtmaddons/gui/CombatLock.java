@@ -1,21 +1,22 @@
 package com.example.gtmaddons.gui;
 
 import com.example.gtmaddons.CombatTracker;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import com.example.gtmaddons.compat.Mc;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 
 /** Stats screens are off-limits in combat: they close the moment you get tagged. */
 final class CombatLock {
 	private CombatLock() {}
 
 	/** Call from a stats screen's tick(). */
-	static void closeIfInCombat(MinecraftClient client) {
+	static void closeIfInCombat(Minecraft client) {
 		if (!CombatTracker.INSTANCE.isTagged()) return;
-		client.setScreen(null);
+		Mc.setScreen(client, null);
 		if (client.player != null) {
-			client.player.sendMessage(Text.literal("[GTMAddOns] Stats closed - you're in combat.")
-					.formatted(Formatting.GRAY), true);
+			Mc.actionBar(client.player, Component.literal("[GTMAddOns] Stats closed - you're in combat.")
+					.withStyle(ChatFormatting.GRAY));
 		}
 	}
 }

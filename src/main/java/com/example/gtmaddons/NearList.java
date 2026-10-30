@@ -1,10 +1,10 @@
 package com.example.gtmaddons;
 
-import net.minecraft.text.MutableText;
-import net.minecraft.text.Style;
-import net.minecraft.text.Text;
-import net.minecraft.text.TextColor;
-import net.minecraft.util.Formatting;
+import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.TextColor;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -54,7 +54,7 @@ public final class NearList {
 	 * A /near reply the player didn't ask for: the server sent it with no command run just before.
 	 * Those are stale or someone else's, so they are hidden instead of shown as if current.
 	 */
-	public static boolean isUnsolicitedReply(Text message) {
+	public static boolean isUnsolicitedReply(Component message) {
 		String plain = message.getString();
 		if (!plain.contains("[GTM]")) return false;
 		if (!plain.contains(HEADER.substring(0, HEADER.length() - 1)) && !plain.contains("No nearby players found")) return false;
@@ -67,7 +67,7 @@ public final class NearList {
 	private record Player(int start, int end, int distance) {}
 
 	/** GTM's /near reply as a sorted list, or the message unchanged if it isn't one. */
-	public static Text reformat(Text message) {
+	public static Component reformat(Component message) {
 		List<Run> runs = new ArrayList<>();
 		message.visit((Style style, String part) -> {
 			if (!part.isEmpty()) runs.add(new Run(part, style));
@@ -92,13 +92,13 @@ public final class NearList {
 		players.sort(Comparator.comparingInt(Player::distance));
 
 		// "[GTM] " as GTM styled it, then everyone on one line, closest first.
-		MutableText out = slice(runs, plain.indexOf("[GTM]"), header).copy();
-		out.append(Text.literal("Near: ").formatted(Formatting.GRAY));
+		MutableComponent out = slice(runs, plain.indexOf("[GTM]"), header).copy();
+		out.append(Component.literal("Near: ").withStyle(ChatFormatting.GRAY));
 		for (int i = 0; i < players.size(); i++) {
 			Player p = players.get(i);
-			if (i > 0) out.append(Text.literal(", ").formatted(Formatting.DARK_GRAY));
+			if (i > 0) out.append(Component.literal(", ").withStyle(ChatFormatting.DARK_GRAY));
 			out.append(name(runs, plain, p));
-			out.append(Text.literal(" (" + p.distance() + "b)").formatted(Formatting.GRAY));
+			out.append(Component.literal(" (" + p.distance() + "b)").withStyle(ChatFormatting.GRAY));
 		}
 		return out;
 	}
@@ -107,13 +107,13 @@ public final class NearList {
 	 * GTM's rank colors (the rank is the word ending in ">", e.g. "VIP>"):
 	 * &c Supreme, &5 Sponsor, &b Elite, &a Premium, &6 VIP.
 	 */
-	private static Formatting rankColor(String rank) {
+	private static ChatFormatting rankColor(String rank) {
 		return switch (rank.toUpperCase(java.util.Locale.ROOT)) {
-			case "SUPREME" -> Formatting.RED;
-			case "SPONSOR" -> Formatting.DARK_PURPLE;
-			case "ELITE" -> Formatting.AQUA;
-			case "PREMIUM" -> Formatting.GREEN;
-			case "VIP" -> Formatting.GOLD;
+			case "SUPREME" -> ChatFormatting.RED;
+			case "SPONSOR" -> ChatFormatting.DARK_PURPLE;
+			case "ELITE" -> ChatFormatting.AQUA;
+			case "PREMIUM" -> ChatFormatting.GREEN;
+			case "VIP" -> ChatFormatting.GOLD;
 			default -> null;
 		};
 	}
@@ -124,26 +124,26 @@ public final class NearList {
 	 * in their rank's color. With no known rank it keeps the name's own color.
 	 * Anything else on the name (like hover text) is kept.
 	 */
-	private static Text name(List<Run> runs, String plain, Player p) {
+	private static Component name(List<Run> runs, String plain, Player p) {
 		String entry = plain.substring(p.start(), p.end());
 		String[] words = entry.trim().split("\\s+");
 		String name = words[words.length - 1];
 		int nameStart = p.start() + entry.lastIndexOf(name);
 
 		Style nameStyle = styleAt(runs, nameStart);
-		Formatting rank = words[0].endsWith(">") ? rankColor(words[0].substring(0, words[0].length() - 1)) : null;
-		TextColor color = rank != null ? TextColor.fromFormatting(rank) : nameStyle.getColor();
-		Text nameText = Text.literal(name).setStyle(nameStyle.withColor(color).withBold(true));
+		ChatFormatting rank = words[0].endsWith(">") ? rankColor(words[0].substring(0, words[0].length() - 1)) : null;
+		TextColor color = rank != null ? TextColor.fromLegacyFormat(rank) : nameStyle.getColor();
+		Component nameText = Component.literal(name).setStyle(nameStyle.withColor(color).withBold(true));
 
 		// Tags are dropped, except the ones that name a player's job: those stay in front of the name, in their own style.
-		MutableText out = Text.empty();
+		MutableComponent out = Component.empty();
 		int from = 0;
 		for (int i = 0; i < words.length - 1; i++) {
 			int at = entry.indexOf(words[i], from);
 			if (at < 0) continue;
 			from = at + words[i].length();
 			String letters = words[i].replaceAll("[^A-Za-z]", "").toLowerCase(java.util.Locale.ROOT);
-			if (JOB_TAGS.contains(letters)) out.append(Text.literal(words[i] + " ").setStyle(styleAt(runs, p.start() + at).withBold(false)));
+			if (JOB_TAGS.contains(letters)) out.append(Component.literal(words[i] + " ").setStyle(styleAt(runs, p.start() + at).withBold(false)));
 		}
 		out.append(nameText);
 		return out;
@@ -160,14 +160,14 @@ public final class NearList {
 	}
 
 	/** The part of the message from start to end, keeping each run's style. */
-	private static MutableText slice(List<Run> runs, int start, int end) {
-		MutableText out = Text.empty();
+	private static MutableComponent slice(List<Run> runs, int start, int end) {
+		MutableComponent out = Component.empty();
 		int at = 0;
 		for (Run run : runs) {
 			int runStart = at, runEnd = at + run.text().length();
 			at = runEnd;
 			int from = Math.max(start, runStart), to = Math.min(end, runEnd);
-			if (from < to) out.append(Text.literal(run.text().substring(from - runStart, to - runStart)).setStyle(run.style()));
+			if (from < to) out.append(Component.literal(run.text().substring(from - runStart, to - runStart)).setStyle(run.style()));
 		}
 		return out;
 	}

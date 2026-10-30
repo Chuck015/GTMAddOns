@@ -1,9 +1,9 @@
 package com.example.gtmaddons;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
+import net.minecraft.client.Minecraft;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -119,17 +119,17 @@ public final class GearTracker {
 		return name.toLowerCase(Locale.ROOT);
 	}
 
-	public void onFrame(MinecraftClient client) {
+	public void onFrame(Minecraft client) {
 		long now = System.nanoTime();
 		if (now - lastScanNanos < SCAN_NANOS) return;
 		lastScanNanos = now;
-		PlayerEntity me = client.player;
-		if (client.world == null || me == null) {
+		Player me = client.player;
+		if (client.level == null || me == null) {
 			tracks.clear();
 			return;
 		}
 		Set<String> present = new HashSet<>();
-		for (PlayerEntity p : client.world.getPlayers()) {
+		for (Player p : client.level.players()) {
 			if (p == me) continue;
 			double distance = me.distanceTo(p);
 			if (distance > RANGE) continue; // out of range: no data (an existing track is dropped below unless a fight is on)
@@ -147,8 +147,8 @@ public final class GearTracker {
 			String[] slots = new String[SLOTS];
 			Kind kind = Kind.NONE;
 			for (int i = 0; i < SLOTS; i++) {
-				ItemStack stack = p.getEquippedStack(ORDER[i]);
-				slots[i] = stack.isEmpty() ? "-" : stack.getName().getString();
+				ItemStack stack = p.getItemBySlot(ORDER[i]);
+				slots[i] = stack.isEmpty() ? "-" : stack.getHoverName().getString();
 				if (ORDER[i] == EquipmentSlot.CHEST) kind = PvpCategory.isWornJetpack(stack) ? Kind.JETPACK : PvpCategory.isWingsuit(stack) ? Kind.WINGSUIT : Kind.NONE;
 			}
 			Look last = t.looks.peekLast();

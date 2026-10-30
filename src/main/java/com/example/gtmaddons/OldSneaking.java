@@ -1,7 +1,5 @@
 package com.example.gtmaddons;
 
-import net.minecraft.client.MinecraftClient;
-
 /**
  * The "Old sneaking" setting: Minecraft 1.8 showed you crouching while you flew and held sneak; newer versions only fly
  * down, because the player's pose is "crouching" only when sneaking and not flying. With this on, every player's MODEL (yours and everyone

@@ -1,11 +1,11 @@
 package com.example.gtmaddons;
 
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.network.AbstractClientPlayerEntity;
-import net.minecraft.entity.EquipmentSlot;
-import net.minecraft.network.packet.s2c.play.ParticleS2CPacket;
-import net.minecraft.particle.ParticleType;
-import net.minecraft.particle.ParticleTypes;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.particles.ParticleType;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.player.Player;
 
 /**
  * The "Hide jetpack particles" setting: a flying jetpack sends flame and cloud particles at its wearer, and this drops
@@ -26,14 +26,14 @@ public final class JetpackParticles {
 	}
 
 	/** Whether this particle packet is a jetpack's exhaust that should not be shown. */
-	public static boolean shouldHide(ParticleS2CPacket packet) {
+	public static boolean shouldHide(ClientboundLevelParticlesPacket packet) {
 		if (settings == null || !settings.hideJetpackParticles) return false;
-		ParticleType<?> type = packet.getParameters().getType();
+		ParticleType<?> type = packet.getParticle().getType();
 		if (type != ParticleTypes.FLAME && type != ParticleTypes.CLOUD) return false;
-		MinecraftClient client = MinecraftClient.getInstance();
-		if (client.world == null) return false;
-		for (AbstractClientPlayerEntity player : client.world.getPlayers()) {
-			if (player.isOnGround() || !PvpCategory.isWornJetpack(player.getEquippedStack(EquipmentSlot.CHEST))) continue;
+		Minecraft client = Minecraft.getInstance();
+		if (client.level == null) return false;
+		for (Player player : client.level.players()) {
+			if (player.onGround() || !PvpCategory.isWornJetpack(player.getItemBySlot(EquipmentSlot.CHEST))) continue;
 			double dx = packet.getX() - player.getX(), dy = packet.getY() - player.getY(), dz = packet.getZ() - player.getZ();
 			if (dx * dx + dy * dy + dz * dz <= RADIUS * RADIUS) return true;
 		}

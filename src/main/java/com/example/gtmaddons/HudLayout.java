@@ -1,9 +1,9 @@
 package com.example.gtmaddons;
 
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
+import com.example.gtmaddons.compat.Gfx;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.gui.Font;
+import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,20 +24,20 @@ import java.util.List;
 public final class HudLayout {
 
 	public enum Element {
-		SWAP_TIMER("Swap timer", false, Text.literal("Swap Timer: 0.412s").formatted(Formatting.YELLOW)),
-		LAST_SWAP("Corner swap text", true, Text.literal("Last Swap: 0.412s")),
-		BOOST_ANGLE("Boost angle", false, Text.literal("✔ Boost ready · 14.2° up").formatted(Formatting.GREEN)),
-		BOOST_HEIGHT("Boost height", false, Text.literal("✔ Low enough to boost · Y 187 (limit 200)").formatted(Formatting.GREEN)),
-		COMBO_LOCK("Combo'd timer", false, Text.literal("⚔ Combo'd |||||||||||||||||||| 0.43s").formatted(Formatting.RED)),
-		COMBO_HIT("Hit again timer", false, Text.literal("⚔ Hit again |||||||||||||||||||| 0.31s").formatted(Formatting.AQUA)),
-		COMBAT_TIMER("Combat timer", false, Text.literal("⚔ In combat 12.4s").formatted(Formatting.RED));
+		SWAP_TIMER("Swap timer", false, Component.literal("Swap Timer: 0.412s").withStyle(ChatFormatting.YELLOW)),
+		LAST_SWAP("Corner swap text", true, Component.literal("Last Swap: 0.412s")),
+		BOOST_ANGLE("Boost angle", false, Component.literal("✔ Boost ready · 14.2° up").withStyle(ChatFormatting.GREEN)),
+		BOOST_HEIGHT("Boost height", false, Component.literal("✔ Low enough to boost · Y 187 (limit 200)").withStyle(ChatFormatting.GREEN)),
+		COMBO_LOCK("Combo'd timer", false, Component.literal("⚔ Combo'd |||||||||||||||||||| 0.43s").withStyle(ChatFormatting.RED)),
+		COMBO_HIT("Hit again timer", false, Component.literal("⚔ Hit again |||||||||||||||||||| 0.31s").withStyle(ChatFormatting.AQUA)),
+		COMBAT_TIMER("Combat timer", false, Component.literal("⚔ In combat 12.4s").withStyle(ChatFormatting.RED));
 
 		public final String label;
 		public final boolean leftAligned;
 		/** What the Move HUD screen shows for it. */
-		public final Text sample;
+		public final Component sample;
 
-		Element(String label, boolean leftAligned, Text sample) {
+		Element(String label, boolean leftAligned, Component sample) {
 			this.label = label;
 			this.leftAligned = leftAligned;
 			this.sample = sample;
@@ -119,17 +119,17 @@ public final class HudLayout {
 	 * it would overlap something already drawn this frame, so displays moved
 	 * on top of each other never show at the same time.
 	 */
-	public static void draw(DrawContext context, TextRenderer font, Element element, Text text) {
+	public static void draw(Gfx context, Font font, Element element, Component text) {
 		if (text == null) return;
-		int w = context.getScaledWindowWidth(), h = context.getScaledWindowHeight();
+		int w = context.guiWidth(), h = context.guiHeight();
 		int[] anchor = anchor(element, w, h);
-		int textWidth = font.getWidth(text);
+		int textWidth = font.width(text);
 		int x = left(element, anchor[0], textWidth, w), y = top(anchor[1], h);
 		int[] box = { x, y, x + textWidth, y + 9 };
 		for (int[] other : drawn) {
 			if (box[0] < other[2] && other[0] < box[2] && box[1] < other[3] && other[1] < box[3]) return;
 		}
 		drawn.add(box);
-		context.drawTextWithShadow(font, text, x, y, 0xFFFFFFFF);
+		context.text(font, text, x, y, 0xFFFFFFFF);
 	}
 }

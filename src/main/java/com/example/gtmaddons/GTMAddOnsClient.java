@@ -1,44 +1,46 @@
 package com.example.gtmaddons;
 
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.fabricmc.fabric.api.client.screen.v1.Screens;
-import com.example.gtmaddons.update.Updater;
-import com.example.gtmaddons.gui.PlayersScreen;
+import com.example.gtmaddons.compat.Gfx;
+import com.example.gtmaddons.compat.Hooks;
+import com.example.gtmaddons.compat.Mc;
 import com.example.gtmaddons.gui.Format;
 import com.example.gtmaddons.gui.MainScreen;
 import com.example.gtmaddons.gui.PlayerScreen;
+import com.example.gtmaddons.gui.PlayersScreen;
+import com.example.gtmaddons.gun.DevFilter;
+import com.example.gtmaddons.gun.DevLogger;
+import com.example.gtmaddons.gun.ShotTracker;
 import com.example.gtmaddons.mixin.HandledScreenAccessor;
 import com.example.gtmaddons.stats.PlayerStats;
 import com.example.gtmaddons.stats.StatsClient;
 import com.example.gtmaddons.stats.SwapRecord;
+import com.example.gtmaddons.update.Updater;
+import com.mojang.blaze3d.platform.Window;
 import com.mojang.brigadier.CommandDispatcher;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenKeyboardEvents;
+import net.fabricmc.fabric.api.client.screen.v1.ScreenMouseEvents;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
-import com.example.gtmaddons.gun.DevFilter;
-import com.example.gtmaddons.gun.DevLogger;
-import com.example.gtmaddons.gun.ShotTracker;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.screen.ingame.CreativeInventoryScreen;
-import net.minecraft.client.gui.screen.ingame.HandledScreen;
-import net.minecraft.client.gui.screen.ingame.InventoryScreen;
-import net.minecraft.client.render.RenderTickCounter;
-import net.minecraft.client.util.Window;
-import net.minecraft.entity.player.PlayerInventory;
-import net.minecraft.item.ItemStack;
-import net.minecraft.screen.slot.Slot;
-import net.minecraft.text.Text;
-import net.minecraft.util.Formatting;
-import net.minecraft.util.math.Vec3d;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.gui.screens.inventory.CreativeModeInventoryScreen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.Vec3;
+import static com.example.gtmaddons.compat.Hooks.literal;
 
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -47,8 +49,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
-
-import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal;
 
 /**
  * GTMAddOns
@@ -123,7 +123,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	private double lastDurationSeconds = -1;
 	private long lastSwapMillis = 0L;
 	// Swap timer line and when it was set
-	private Text swapTimerText = null;
+	private Component swapTimerText = null;
 	private long swapTimerMillis = 0L;
 
 	// Wingsuit-arrival detection
@@ -137,6 +137,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	// Air PvP swaps are read from how many jetpacks/wingsuits your hotbar
 	// gains or loses (the chest slot can show stale items on high ping).
 	private boolean airSwap = false;
+	/** A JP PvP swap: tracked and stored with the fight, but not counted in the swap stats (those only read Wing and Air). */
+	private boolean jpSwap = false;
 	private ItemStack chestAtOpen = ItemStack.EMPTY;
 	// Momentum: horizontal speed (blocks/s) when the inventory opened, and
 	// whether the wingsuit went into a hotbar slot that was empty at open.
@@ -167,6 +169,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	// Debug mode
 	private int wingsuitInventoryIndex = -1;
 	private final SwapDebugTracker debugTracker = new SwapDebugTracker();
+	/** Input seen while the inventory is open for a swap, and how it closed (SwapInputs). */
+	private final SwapInputs swapInputs = new SwapInputs();
 
 	private final StatsClient stats = new StatsClient();
 	private final Settings settings = Settings.load();
@@ -178,24 +182,28 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		JetpackParticles.init(settings);
 		RecipeBookHider.init(settings);
 		DroppedItemLabels.init(settings);
+		BlackOpsGlint.init(settings);
 		CobwebTransparency.init(settings);
+		InventoryTransparency.init(settings);
 		com.example.gtmaddons.gui.FightViews.init(settings);
 		OldSneaking.init(settings);
 		stats.setShowUsers(settings.showModUsers);
-		HudRenderCallback.EVENT.register(this::onHudRender);
+		Hooks.onHud(this::onHudRender);
 		ClientCommandRegistrationCallback.EVENT.register(this::registerCommands);
 		ClientLifecycleEvents.CLIENT_STOPPING.register(client -> stats.flushBlocking(3000));
 		// A fight ending inside a swap's momentum window still gets that swap.
 		FightTracker.INSTANCE.setBeforeFightEnds(this::finishMomentum);
-		WorldRenderEvents.START_MAIN.register(context -> {
-			MinecraftClient client = MinecraftClient.getInstance();
+		Hooks.onFrameStart(() -> {
+			Minecraft client = Minecraft.getInstance();
 			long frameStart = System.nanoTime();
 			momentumFrame(client);
 			ModUsers.onFrame(client);
 			// Before CombatTracker, so a death is seen before it clears the tag.
 			GearTracker.INSTANCE.onFrame(client);
 			DroppedItemLabels.onFrame(client);
+			GunSounds.INSTANCE.setPlayer(client.player != null, client.player != null ? client.player.getX() : 0.0, client.player != null ? client.player.getY() : 0.0, client.player != null ? client.player.getZ() : 0.0);
 			MovementInputTracker.INSTANCE.onFrame(client);
+			MouseTracker.INSTANCE.onFrame(client);
 			FightTracker.INSTANCE.onFrame(client);
 			CombatTracker.INSTANCE.onFrame(client);
 			ShotTracker.INSTANCE.onFrame(client);
@@ -235,6 +243,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		ShotTracker.INSTANCE.addListener(FightTracker.INSTANCE::addShot);
 		ComboTracker.INSTANCE.addListener(FightTracker.INSTANCE::addCombo);
 		FightTracker.INSTANCE.addListener(stats::submitFight);
+		FightTracker.INSTANCE.addListener(SessionStats.INSTANCE::onFight);
 		ShotTracker.INSTANCE.addListener(DevLogger.INSTANCE::onShotResult);
 		GunSounds.INSTANCE.init(settings);
 		HudLayout.init(settings);
@@ -243,7 +252,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		DevLogger.INSTANCE.init(settings);
 		HitSounds.INSTANCE.init(settings);
 		// "Use to draw lines" - drawn with the vanilla debug renders.
-		WorldRenderEvents.BEFORE_DEBUG_RENDER.register(TrajectoryLines.INSTANCE::render);
+		TrajectoryLines.INSTANCE.register();
 		ShotTracker.INSTANCE.addListener(LatencyTester.INSTANCE::onShot);
 		ShotTracker.INSTANCE.addListener(GunSounds.INSTANCE::onShot);
 		ComboTracker.INSTANCE.addListener(DevLogger.INSTANCE::onComboResult);
@@ -262,7 +271,20 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			if (isTrackedInventoryScreen(screen) && (resumed || onInventoryOpened(client))) {
 				if (!resumed) captureOpenState(client, screen);
 				// Checked every frame so arrival and mouse tracking are frame-accurate.
-				ScreenEvents.afterRender(screen).register((s, drawContext, mouseX, mouseY, tickDelta) -> onInventoryFrame(client, s));
+				Hooks.afterFrame(screen, s -> onInventoryFrame(client, s));
+				// Key presses, clicks and scrolls the open inventory receives (counted, never recorded: SwapInputs).
+				ScreenKeyboardEvents.allowKeyPress(screen).register((s, input) -> {
+					swapInputs.onKey(input.key());
+					return true;
+				});
+				ScreenMouseEvents.allowMouseClick(screen).register((s, click) -> {
+					swapInputs.onClick();
+					return true;
+				});
+				ScreenMouseEvents.allowMouseScroll(screen).register((s, mouseX, mouseY, horizontal, vertical) -> {
+					swapInputs.onScroll();
+					return true;
+				});
 				// Fires the instant THIS screen instance is removed - i.e.
 				// exactly when it closes (or is swapped for another screen).
 				ScreenEvents.remove(screen).register(closedScreen -> onInventoryClosed(client));
@@ -273,12 +295,12 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	/** The Start / Stop swap recording button to the right of the inventory; follows the inventory when it moves (recipe book). */
 	private void addSwapRecordButton(Screen screen) {
 		HandledScreenAccessor accessor = (HandledScreenAccessor) screen;
-		ButtonWidget button = ButtonWidget.builder(swapRecordLabel(), b -> {
+		Button button = Button.builder(swapRecordLabel(), b -> {
 			toggleSwapRecording();
 			b.setMessage(swapRecordLabel());
-		}).dimensions(accessor.gtmaddons$getX() + INVENTORY_WIDTH + 4, accessor.gtmaddons$getY(), 92, 20).build();
-		Screens.getButtons(screen).add(button);
-		ScreenEvents.beforeRender(screen).register((s, drawContext, mouseX, mouseY, tickDelta) -> {
+		}).bounds(accessor.gtmaddons$getX() + INVENTORY_WIDTH + 4, accessor.gtmaddons$getY(), 92, 20).build();
+		Hooks.addWidget(screen, button);
+		Hooks.beforeFrame(screen, s -> {
 			button.setX(accessor.gtmaddons$getX() + INVENTORY_WIDTH + 4);
 			button.setY(accessor.gtmaddons$getY());
 			button.setMessage(swapRecordLabel());
@@ -287,8 +309,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 
 	private static final int INVENTORY_WIDTH = 176;
 
-	private Text swapRecordLabel() {
-		return Text.literal(SwapSession.INSTANCE.isRecording() ? "Stop recording" : "Start recording");
+	private Component swapRecordLabel() {
+		return Component.literal(SwapSession.INSTANCE.isRecording() ? "Stop recording" : "Start recording");
 	}
 
 	/** Same as /gao swapinfo start and end. */
@@ -359,6 +381,15 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		settings.save();
 	}
 
+	public int getInventoryTransparency() {
+		return settings.inventoryTransparency;
+	}
+
+	public void setInventoryTransparency(int percent) {
+		settings.inventoryTransparency = Math.max(0, Math.min(100, percent));
+		settings.save();
+	}
+
 	public boolean isHideJetpackParticlesOn() {
 		return settings.hideJetpackParticles;
 	}
@@ -378,12 +409,12 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	}
 
 	private boolean isTrackedInventoryScreen(Screen screen) {
-		return screen instanceof InventoryScreen || screen instanceof CreativeInventoryScreen;
+		return screen instanceof InventoryScreen || screen instanceof CreativeModeInventoryScreen;
 	}
 
 	/** The only commands: /GTMAddOns, /gao and /gtmaddons, which open the menu. Everything else is in the GUI. */
 	private void registerCommands(CommandDispatcher<FabricClientCommandSource> dispatcher,
-			net.minecraft.command.CommandRegistryAccess registryAccess) {
+			net.minecraft.commands.CommandBuildContext registryAccess) {
 		for (String name : new String[] { "GTMAddOns", "gao", "gtmaddons" }) {
 			dispatcher.register(literal(name).then(literal("update").executes(ctx -> {
 				Updater.INSTANCE.requestUpdate();
@@ -423,22 +454,22 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	private long lastUpdateCardNanos = 0L;
 
 	/** Updater messages in one styled line, and the update card now and every 5 minutes while an update is waiting. */
-	private void showUpdateNotice(MinecraftClient client) {
+	private void showUpdateNotice(Minecraft client) {
 		if (client.player == null) return;
 		String notice = Updater.INSTANCE.takeNotice();
 		if (notice != null) {
-			Text line = Text.literal("✦ ").formatted(Formatting.AQUA).append(Text.literal("GTMAddOns » ").formatted(Formatting.AQUA)).append(Text.literal(notice).formatted(Formatting.GRAY));
-			client.player.sendMessage(line, false);
+			Component line = Component.literal("✦ ").withStyle(ChatFormatting.AQUA).append(Component.literal("GTMAddOns » ").withStyle(ChatFormatting.AQUA)).append(Component.literal(notice).withStyle(ChatFormatting.GRAY));
+			Mc.chat(client.player, line);
 		}
 		// A message an admin sent (Admin mode > Notify players), with the update button.
 		String adminNotice = AdminNotices.INSTANCE.take();
 		if (adminNotice != null) {
-			Text card = Text.literal("")
-					.append(Text.literal("▬".repeat(28)).formatted(Formatting.DARK_GRAY)).append("\n")
-					.append(Text.literal(" ✦ ").formatted(Formatting.AQUA)).append(Text.literal("GTMAddOns » ").formatted(Formatting.AQUA)).append(Text.literal(adminNotice).formatted(Formatting.WHITE)).append("\n ")
-					.append(Text.literal("[ UPDATE NOW ]").formatted(Formatting.GREEN).formatted(Formatting.BOLD).formatted(Formatting.UNDERLINE).styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent.RunCommand("/gao update")).withHoverEvent(new net.minecraft.text.HoverEvent.ShowText(Text.literal("Download the update now. It is installed when you close the game."))))).append("\n")
-					.append(Text.literal("▬".repeat(28)).formatted(Formatting.DARK_GRAY));
-			client.player.sendMessage(card, false);
+			Component card = Component.literal("")
+					.append(Component.literal("▬".repeat(28)).withStyle(ChatFormatting.DARK_GRAY)).append("\n")
+					.append(Component.literal(" ✦ ").withStyle(ChatFormatting.AQUA)).append(Component.literal("GTMAddOns » ").withStyle(ChatFormatting.AQUA)).append(Component.literal(adminNotice).withStyle(ChatFormatting.WHITE)).append("\n ")
+					.append(Component.literal("[ UPDATE NOW ]").withStyle(ChatFormatting.GREEN).withStyle(ChatFormatting.BOLD).withStyle(ChatFormatting.UNDERLINE).withStyle(s -> s.withClickEvent(new net.minecraft.network.chat.ClickEvent.RunCommand("/gao update")).withHoverEvent(new net.minecraft.network.chat.HoverEvent.ShowText(Component.literal("Download the update now. It is installed when you close the game."))))).append("\n")
+					.append(Component.literal("▬".repeat(28)).withStyle(ChatFormatting.DARK_GRAY));
+			Mc.chat(client.player, card);
 		}
 		Updater.State state = Updater.INSTANCE.state();
 		if (state != Updater.State.AVAILABLE && state != Updater.State.READY) {
@@ -449,25 +480,25 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		if (lastUpdateCardNanos != 0L && now - lastUpdateCardNanos < UPDATE_CARD_GAP_NANOS) return;
 		lastUpdateCardNanos = now;
 		String latest = Updater.INSTANCE.latestVersion() != null ? Updater.INSTANCE.latestVersion() : "?";
-		net.minecraft.text.MutableText card = Text.literal("")
-				.append(Text.literal("▬".repeat(28)).formatted(Formatting.DARK_GRAY)).append("\n")
-				.append(Text.literal(" ✦ ").formatted(Formatting.AQUA)).append(Text.literal(state == Updater.State.READY ? "GTMAddOns " + latest + " is downloaded" : "GTMAddOns update available").formatted(Formatting.WHITE).formatted(Formatting.BOLD)).append("\n");
+		net.minecraft.network.chat.MutableComponent card = Component.literal("")
+				.append(Component.literal("▬".repeat(28)).withStyle(ChatFormatting.DARK_GRAY)).append("\n")
+				.append(Component.literal(" ✦ ").withStyle(ChatFormatting.AQUA)).append(Component.literal(state == Updater.State.READY ? "GTMAddOns " + latest + " is downloaded" : "GTMAddOns update available").withStyle(ChatFormatting.WHITE).withStyle(ChatFormatting.BOLD)).append("\n");
 		if (state == Updater.State.AVAILABLE) {
-			card = card.append(Text.literal(" " + Updater.modVersion() + " → ").formatted(Formatting.GRAY)).append(Text.literal(latest).formatted(Formatting.GREEN).formatted(Formatting.BOLD)).append("   ")
-					.append(Text.literal("[ UPDATE NOW ]").formatted(Formatting.GREEN).formatted(Formatting.BOLD).formatted(Formatting.UNDERLINE).styled(s -> s.withClickEvent(new net.minecraft.text.ClickEvent.RunCommand("/gao update")).withHoverEvent(new net.minecraft.text.HoverEvent.ShowText(Text.literal("Download the update now. It is installed when you close the game."))))).append("\n")
-					.append(Text.literal(" Downloads in the background and installs when you close the game.").formatted(Formatting.GRAY)).append("\n")
-					.append(Text.literal(" Reminder every 5 minutes until you update.").formatted(Formatting.DARK_GRAY)).append("\n");
+			card = card.append(Component.literal(" " + Updater.modVersion() + " → ").withStyle(ChatFormatting.GRAY)).append(Component.literal(latest).withStyle(ChatFormatting.GREEN).withStyle(ChatFormatting.BOLD)).append("   ")
+					.append(Component.literal("[ UPDATE NOW ]").withStyle(ChatFormatting.GREEN).withStyle(ChatFormatting.BOLD).withStyle(ChatFormatting.UNDERLINE).withStyle(s -> s.withClickEvent(new net.minecraft.network.chat.ClickEvent.RunCommand("/gao update")).withHoverEvent(new net.minecraft.network.chat.HoverEvent.ShowText(Component.literal("Download the update now. It is installed when you close the game."))))).append("\n")
+					.append(Component.literal(" Downloads in the background and installs when you close the game.").withStyle(ChatFormatting.GRAY)).append("\n")
+					.append(Component.literal(" Reminder every 5 minutes until you update.").withStyle(ChatFormatting.DARK_GRAY)).append("\n");
 		} else {
-			card = card.append(Text.literal(" Close the game fully to finish installing it.").formatted(Formatting.GRAY)).append("\n")
-					.append(Text.literal(" Reminder every 5 minutes until then.").formatted(Formatting.DARK_GRAY)).append("\n");
+			card = card.append(Component.literal(" Close the game fully to finish installing it.").withStyle(ChatFormatting.GRAY)).append("\n")
+					.append(Component.literal(" Reminder every 5 minutes until then.").withStyle(ChatFormatting.DARK_GRAY)).append("\n");
 		}
-		card = card.append(Text.literal("▬".repeat(28)).formatted(Formatting.DARK_GRAY));
-		client.player.sendMessage(card, false);
+		card = card.append(Component.literal("▬".repeat(28)).withStyle(ChatFormatting.DARK_GRAY));
+		Mc.chat(client.player, card);
 	}
 
 	private void openMainScreen() {
-		MinecraftClient client = MinecraftClient.getInstance();
-		client.send(() -> client.setScreen(new MainScreen(this)));
+		Minecraft client = Minecraft.getInstance();
+		client.schedule(() -> Mc.setScreen(client, new MainScreen(this)));
 	}
 
 	// ---- Used by the menus ----
@@ -541,6 +572,15 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		settings.showModUsers = on;
 		settings.save();
 		stats.setShowUsers(on);
+	}
+
+	public boolean isBlackOpsGlintOn() {
+		return settings.blackOpsGlint;
+	}
+
+	public void setBlackOpsGlintOn(boolean on) {
+		settings.blackOpsGlint = on;
+		settings.save();
 	}
 
 	public boolean isDroppedItemNamesOn() {
@@ -637,7 +677,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		status.accept("Loading the leaderboard...");
 		PvpCategory tab = getLeaderboardTab();
 		stats.fetchLeaderboard(tab, com.example.gtmaddons.stats.FightFilter.MAX_FIGHTS, java.util.Set.of()).whenComplete((board, error) -> {
-			MinecraftClient client = MinecraftClient.getInstance();
+			Minecraft client = Minecraft.getInstance();
 			// Runs on the game thread, after the chat screen has closed.
 			client.execute(() -> {
 				if (error != null) {
@@ -645,7 +685,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 				} else if (isInCombat()) {
 					status.accept("Stats are locked while you're in combat.");
 				} else {
-					client.setScreen(new PlayersScreen(parent, stats, this, tab, board));
+					Mc.setScreen(client, new PlayersScreen(parent, stats, this, tab, board));
 				}
 			});
 		});
@@ -660,8 +700,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			status.accept("The stats backend isn't set up in this build.");
 			return;
 		}
-		MinecraftClient client = MinecraftClient.getInstance();
-		UUID me = client.getSession().getUuidOrNull();
+		Minecraft client = Minecraft.getInstance();
+		UUID me = client.getUser().getProfileId();
 		if (me == null) {
 			status.accept("No Minecraft account signed in.");
 			return;
@@ -673,7 +713,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			} else if (isInCombat()) {
 				status.accept("Stats are locked while you're in combat.");
 			} else {
-				client.setScreen(new PlayerScreen(parent, detail, stats, this));
+				Mc.setScreen(client, new PlayerScreen(parent, detail, stats, this));
 			}
 		}));
 	}
@@ -739,7 +779,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			status.accept(label + ": unfindable - " + Format.error(t));
 			return;
 		}
-		check.whenComplete((me, error) -> MinecraftClient.getInstance().execute(() -> {
+		check.whenComplete((me, error) -> Minecraft.getInstance().execute(() -> {
 			if (error != null) {
 				Throwable cause = error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
 				status.accept(label + ": unfindable - " + (cause instanceof TimeoutException
@@ -781,11 +821,11 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	 * nothing) when there's nothing to swap: outside Air PvP that means no
 	 * wingsuit outside the hotbar to move into it.
 	 */
-	private boolean onInventoryOpened(MinecraftClient client) {
+	private boolean onInventoryOpened(Minecraft client) {
 		// A new swap ends the last one's momentum window.
 		finishMomentum();
 		if (client.player == null) return false;
-		PlayerInventory inventory = client.player.getInventory();
+		Inventory inventory = client.player.getInventory();
 		// Decided at open, before the swap changes what you're wearing.
 		PvpCategory category = PvpCategory.classify(client.player);
 
@@ -793,12 +833,24 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		if (category == PvpCategory.AIR) {
 			// Air swaps always go through the chest slot.
 			targetIndex = CHEST_INVENTORY_INDEX;
-		} else if (isWingsuit(inventory.getStack(CHEST_INVENTORY_INDEX))) {
+		} else if (category == PvpCategory.JP) {
+			// The worn jetpack, otherwise the first one outside the hotbar, is what a JP swap moves to the hotbar.
+			if (PvpCategory.isWornJetpack(inventory.getItem(CHEST_INVENTORY_INDEX))) {
+				targetIndex = CHEST_INVENTORY_INDEX;
+			} else {
+				for (int i = HOTBAR_SIZE; i < inventory.getContainerSize(); i++) {
+					if (PvpCategory.isJetpack(inventory.getItem(i))) {
+						targetIndex = i;
+						break;
+					}
+				}
+			}
+		} else if (isWingsuit(inventory.getItem(CHEST_INVENTORY_INDEX))) {
 			// Prefer the chest armor slot; otherwise the first wingsuit found.
 			targetIndex = CHEST_INVENTORY_INDEX;
 		} else {
-			for (int i = HOTBAR_SIZE; i < inventory.size(); i++) {
-				if (isWingsuit(inventory.getStack(i))) {
+			for (int i = HOTBAR_SIZE; i < inventory.getContainerSize(); i++) {
+				if (isWingsuit(inventory.getItem(i))) {
 					targetIndex = i;
 					break;
 				}
@@ -812,7 +864,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		wingsuitInventoryIndex = targetIndex;
 		swapCategory = category;
 		airSwap = category == PvpCategory.AIR;
-		chestAtOpen = inventory.getStack(CHEST_INVENTORY_INDEX).copy();
+		jpSwap = category == PvpCategory.JP;
+		chestAtOpen = inventory.getItem(CHEST_INVENTORY_INDEX).copy();
 		hotbarJetpacksAtOpen = countHotbar(inventory, PvpCategory::isJetpack);
 		mainJetpacksAtOpen = countMain(inventory, PvpCategory::isJetpack);
 		mainWingsuitsAtOpen = countMain(inventory, GTMAddOnsClient::isWingsuit);
@@ -825,6 +878,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		inventoryTouched = false;
 		hotbarWingsuitsAtOpen = countHotbarWingsuits(inventory);
 		debugTracker.reset();
+		swapInputs.begin();
 		return true;
 	}
 
@@ -832,31 +886,32 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	 * Records where the cursor and the inventory are the moment the inventory appears. From gameplay vanilla puts the cursor exactly on
 	 * the window centre; the recipe book shifts the inventory sideways, never down.
 	 */
-	private void captureOpenState(MinecraftClient client, Screen screen) {
+	private void captureOpenState(Minecraft client, Screen screen) {
 		Window window = client.getWindow();
-		openCursorDx = client.mouse.getX() - window.getWidth() / 2.0;
-		openCursorDy = client.mouse.getY() - window.getHeight() / 2.0;
-		openScaledW = window.getScaledWidth();
-		openScaledH = window.getScaledHeight();
-		openGuiScale = (double) window.getScaleFactor();
-		if (screen instanceof HandledScreen<?> handled) {
+		openCursorDx = client.mouseHandler.xpos() - Mc.windowWidth(window) / 2.0;
+		openCursorDy = client.mouseHandler.ypos() - Mc.windowHeight(window) / 2.0;
+		openScaledW = window.getGuiScaledWidth();
+		openScaledH = window.getGuiScaledHeight();
+		openGuiScale = (double) window.getGuiScale();
+		if (screen instanceof AbstractContainerScreen<?> handled) {
 			HandledScreenAccessor accessor = (HandledScreenAccessor) handled;
 			openGuiX = accessor.gtmaddons$getX();
 			openGuiY = accessor.gtmaddons$getY();
 		} else {
 			openGuiX = openGuiY = 0;
 		}
-		openCreative = screen instanceof CreativeInventoryScreen;
+		openCreative = screen instanceof CreativeModeInventoryScreen;
 		openFromScreen = lastScreenRemovedNanos >= 0 && System.nanoTime() - lastScreenRemovedNanos < 5_000_000L;
 	}
 
-	private void onInventoryFrame(MinecraftClient client, Screen screen) {
+	private void onInventoryFrame(Minecraft client, Screen screen) {
 		if (!swapInProgress) return;
 		if (!inventoryTouched && client.player != null && inventoryChanged(client.player.getInventory())) inventoryTouched = true;
 		long now = System.nanoTime();
 		// Sample the mouse before checking arrival, so this frame's movement
 		// is counted as leading up to the move rather than after it.
-		debugTracker.sample(client.mouse.getX(), client.mouse.getY(),
+		swapInputs.onFrame(client.mouseHandler.xpos(), client.mouseHandler.ypos());
+		debugTracker.sample(client.mouseHandler.xpos(), client.mouseHandler.ypos(),
 				wingsuitSlotRect(client, screen), arrivalNanos >= 0, now);
 		checkWingsuitArrival(client, now);
 	}
@@ -867,9 +922,9 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	 * reach their final values - a mouse-drag swap passes through in-between
 	 * states, so the time is updated on every change and the last one wins.
 	 */
-	private void checkWingsuitArrival(MinecraftClient client, long nowNanos) {
+	private void checkWingsuitArrival(Minecraft client, long nowNanos) {
 		if (!swapInProgress || client.player == null) return;
-		PlayerInventory inventory = client.player.getInventory();
+		Inventory inventory = client.player.getInventory();
 		if (airSwap) {
 			int jetpackDelta = countHotbar(inventory, PvpCategory::isJetpack) - hotbarJetpacksAtOpen;
 			int wingsuitDelta = countHotbarWingsuits(inventory) - hotbarWingsuitsAtOpen;
@@ -881,23 +936,25 @@ public class GTMAddOnsClient implements ClientModInitializer {
 				wingToBlankSlot = false;
 				if (wingsuitDelta > 0) {
 					for (int i = 0; i < HOTBAR_SIZE && i < inventoryAtOpen.length; i++) {
-						if (isWingsuit(inventory.getStack(i)) && inventoryAtOpen[i].isEmpty()) wingToBlankSlot = true;
+						if (isWingsuit(inventory.getItem(i)) && inventoryAtOpen[i].isEmpty()) wingToBlankSlot = true;
 					}
 				}
 			}
+		} else if (jpSwap) {
+			if (arrivalNanos < 0 && countHotbar(inventory, PvpCategory::isJetpack) > hotbarJetpacksAtOpen) arrivalNanos = nowNanos;
 		} else if (arrivalNanos < 0 && countHotbarWingsuits(inventory) > hotbarWingsuitsAtOpen) {
 			arrivalNanos = nowNanos;
 			// Momentum is only recorded for a wingsuit moved into an empty hotbar slot.
 			for (int i = 0; i < HOTBAR_SIZE && i < inventoryAtOpen.length; i++) {
-				if (isWingsuit(inventory.getStack(i)) && inventoryAtOpen[i].isEmpty()) wingToBlankSlot = true;
+				if (isWingsuit(inventory.getItem(i)) && inventoryAtOpen[i].isEmpty()) wingToBlankSlot = true;
 			}
 		}
 	}
 
 	/** Your horizontal speed in blocks per second (velocity is per tick). */
-	private static double horizontalSpeed(MinecraftClient client) {
+	private static double horizontalSpeed(Minecraft client) {
 		if (client.player == null) return 0.0;
-		Vec3d v = client.player.getVelocity();
+		Vec3 v = client.player.getDeltaMovement();
 		return Math.hypot(v.x, v.z) * 20.0;
 	}
 
@@ -910,7 +967,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	 * changes don't add up to a swap (e.g. just moving a jetpack between
 	 * your inventory and hotbar).
 	 */
-	private SwapType airSwapType(PlayerInventory inventory) {
+	private SwapType airSwapType(Inventory inventory) {
 		if (countMain(inventory, PvpCategory::isJetpack) != mainJetpacksAtOpen
 				|| countMain(inventory, GTMAddOnsClient::isWingsuit) != mainWingsuitsAtOpen) {
 			return null;
@@ -924,7 +981,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		return null;
 	}
 
-	private void onInventoryClosed(MinecraftClient client) {
+	private void onInventoryClosed(Minecraft client) {
 		if (!swapInProgress) return;
 		long closeNanos = System.nanoTime();
 		// Catch an arrival that happened after the last rendered frame.
@@ -943,7 +1000,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			type = client.player != null ? airSwapType(client.player.getInventory()) : null;
 			if (type == null) arrivalNanos = -1L;
 		} else if (arrivalNanos >= 0) {
-			type = SwapType.WINGSUIT;
+			type = jpSwap ? SwapType.JETPACK : SwapType.WINGSUIT;
 		}
 
 		SwapResult result;
@@ -963,10 +1020,10 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		}
 
 		if (settings.showSwapTimer && client.player != null) {
-			Text message = switch (result) {
-				case SUCCESS -> Text.literal(String.format("Swap Timer: %.3fs", totalSeconds)).formatted(Formatting.YELLOW);
-				case FAILED -> Text.literal("Swap Failed").formatted(Formatting.RED);
-				case CANCELED -> Text.literal("Swap Canceled").formatted(Formatting.GRAY);
+			Component message = switch (result) {
+				case SUCCESS -> Component.literal(String.format("Swap Timer: %.3fs", totalSeconds)).withStyle(ChatFormatting.YELLOW);
+				case FAILED -> Component.literal("Swap Failed").withStyle(ChatFormatting.RED);
+				case CANCELED -> Component.literal("Swap Canceled").withStyle(ChatFormatting.GRAY);
 			};
 			// Drawn by onHudRender (movable), not the action bar.
 			swapTimerText = message;
@@ -1006,7 +1063,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	 * as you land. (Not when gliding stops - taking the wingsuit off is the
 	 * swap itself.)
 	 */
-	private void momentumFrame(MinecraftClient client) {
+	private void momentumFrame(Minecraft client) {
 		if (momentumRecord == null) return;
 		long now = System.nanoTime();
 		momentumSum += momentumLastBps * (now - momentumLastNanos);
@@ -1016,7 +1073,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			return;
 		}
 		momentumLastBps = horizontalSpeed(client);
-		if (now - momentumStartNanos >= MOMENTUM_WINDOW_NANOS || client.player.isOnGround()) finishMomentum();
+		if (now - momentumStartNanos >= MOMENTUM_WINDOW_NANOS || client.player.onGround()) finishMomentum();
 	}
 
 	/**
@@ -1042,7 +1099,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		}
 	}
 
-	private SwapRecord buildRecord(MinecraftClient client, SwapResult result, long closeNanos) {
+	private SwapRecord buildRecord(Minecraft client, SwapResult result, long closeNanos) {
 		boolean reached = debugTracker.reachedSlot();
 		boolean arrived = arrivalNanos >= 0;
 		boolean seen = debugTracker.slotSeen();
@@ -1076,7 +1133,36 @@ public class GTMAddOnsClient implements ClientModInitializer {
 				seen ? debugTracker.approachPath() : null,
 				openGuiX, openGuiY, openScaledW, openScaledH, openGuiScale,
 				openCreative ? 1.0 : 0.0, openFromScreen ? 1.0 : 0.0,
-				null, null, null, null, null, null);
+				null, null, null, null, null, null,
+				swapInputs.closeHow(closeNanos), swapInputs.closeKey(closeNanos), swapInputs.keys(), swapInputs.hotbarKeys(), swapInputs.clicks(),
+				swapInputs.scrolls(), swapInputs.moves(), swapInputs.frames(), slotChanges(client), swapInputs.clickPackets());
+	}
+
+	/** The slots that differ from when the inventory opened, as "slot:before>after;..." ("none" if nothing moved); information only. */
+	private String slotChanges(Minecraft client) {
+		if (client.player == null) return null;
+		Inventory inventory = client.player.getInventory();
+		StringBuilder out = new StringBuilder();
+		int shown = 0, changed = 0;
+		for (int i = 0; i < inventoryAtOpen.length && i < inventory.getContainerSize(); i++) {
+			ItemStack now = inventory.getItem(i);
+			if (ItemStack.matches(inventoryAtOpen[i], now)) continue;
+			changed++;
+			if (shown >= 12) continue;
+			shown++;
+			if (out.length() > 0) out.append(';');
+			out.append(i).append(':').append(stackLabel(inventoryAtOpen[i])).append('>').append(stackLabel(now));
+		}
+		if (changed == 0) return "none";
+		if (changed > shown) out.append(";+").append(changed - shown);
+		return out.toString();
+	}
+
+	private static String stackLabel(ItemStack stack) {
+		if (stack.isEmpty()) return "empty";
+		String name = stack.getHoverName().getString().replaceAll("[;:>]", " ").trim();
+		if (name.length() > 24) name = name.substring(0, 24);
+		return stack.getCount() > 1 ? name + " x" + stack.getCount() : name;
 	}
 
 	private void sendDebugReport(SwapRecord r) {
@@ -1089,15 +1175,15 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	 * window pixels (matching Mouse.getX/getY), or null if that slot isn't
 	 * part of the current screen (e.g. a non-inventory creative tab).
 	 */
-	private double[] wingsuitSlotRect(MinecraftClient client, Screen screen) {
-		if (client.player == null || !(screen instanceof HandledScreen<?> handled)) return null;
-		PlayerInventory inventory = client.player.getInventory();
-		for (Slot slot : handled.getScreenHandler().slots) {
-			if (slot.inventory == inventory && slot.getIndex() == wingsuitInventoryIndex) {
+	private double[] wingsuitSlotRect(Minecraft client, Screen screen) {
+		if (client.player == null || !(screen instanceof AbstractContainerScreen<?> handled)) return null;
+		Inventory inventory = client.player.getInventory();
+		for (Slot slot : handled.getMenu().slots) {
+			if (slot.container == inventory && slot.getContainerSlot() == wingsuitInventoryIndex) {
 				HandledScreenAccessor accessor = (HandledScreenAccessor) handled;
 				Window window = client.getWindow();
-				double scale = window.getWidth() / (double) window.getScaledWidth();
-				// Same 18x18 hover area HandledScreen uses for a 16x16 slot.
+				double scale = Mc.windowWidth(window) / (double) window.getGuiScaledWidth();
+				// Same 18x18 hover area AbstractContainerScreen uses for a 16x16 slot.
 				double minX = accessor.gtmaddons$getX() + slot.x - 1;
 				double minY = accessor.gtmaddons$getY() + slot.y - 1;
 				return new double[] { minX * scale, minY * scale, (minX + 18) * scale, (minY + 18) * scale };
@@ -1111,8 +1197,8 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	 * current sensitivity - the same formula Minecraft uses for looking
 	 * around - so inventory cursor movement can be read in degrees.
 	 */
-	private static double degreesPerPixel(MinecraftClient client) {
-		double f = client.options.getMouseSensitivity().getValue() * 0.6 + 0.2;
+	private static double degreesPerPixel(Minecraft client) {
+		double f = client.options.sensitivity().get() * 0.6 + 0.2;
 		return f * f * f * 8.0 * 0.15;
 	}
 
@@ -1124,55 +1210,55 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		return PvpCategory.isWingsuit(stack);
 	}
 
-	private static int countHotbarWingsuits(PlayerInventory inventory) {
+	private static int countHotbarWingsuits(Inventory inventory) {
 		return countHotbar(inventory, GTMAddOnsClient::isWingsuit);
 	}
 
 	/** Counts matching items in the main inventory (not the hotbar, armor or offhand). */
-	private static int countMain(PlayerInventory inventory, Predicate<ItemStack> matches) {
+	private static int countMain(Inventory inventory, Predicate<ItemStack> matches) {
 		int count = 0;
-		for (int i = HOTBAR_SIZE; i < PlayerInventory.MAIN_SIZE; i++) {
-			if (matches.test(inventory.getStack(i))) count++;
+		for (int i = HOTBAR_SIZE; i < Inventory.INVENTORY_SIZE; i++) {
+			if (matches.test(inventory.getItem(i))) count++;
 		}
 		return count;
 	}
 
-	private static int countHotbar(PlayerInventory inventory, Predicate<ItemStack> matches) {
+	private static int countHotbar(Inventory inventory, Predicate<ItemStack> matches) {
 		int count = 0;
 		for (int i = 0; i < HOTBAR_SIZE; i++) {
-			if (matches.test(inventory.getStack(i))) count++;
+			if (matches.test(inventory.getItem(i))) count++;
 		}
 		return count;
 	}
 
-	private static ItemStack[] snapshot(PlayerInventory inventory) {
-		ItemStack[] stacks = new ItemStack[inventory.size()];
+	private static ItemStack[] snapshot(Inventory inventory) {
+		ItemStack[] stacks = new ItemStack[inventory.getContainerSize()];
 		for (int i = 0; i < stacks.length; i++) {
-			stacks[i] = inventory.getStack(i).copy();
+			stacks[i] = inventory.getItem(i).copy();
 		}
 		return stacks;
 	}
 
-	private boolean inventoryChanged(PlayerInventory inventory) {
-		if (inventory.size() != inventoryAtOpen.length) return true;
+	private boolean inventoryChanged(Inventory inventory) {
+		if (inventory.getContainerSize() != inventoryAtOpen.length) return true;
 		for (int i = 0; i < inventoryAtOpen.length; i++) {
-			if (!ItemStack.areEqual(inventoryAtOpen[i], inventory.getStack(i))) return true;
+			if (!ItemStack.matches(inventoryAtOpen[i], inventory.getItem(i))) return true;
 		}
 		return false;
 	}
 
-	private void onHudRender(DrawContext drawContext, RenderTickCounter tickCounter) {
+	private void onHudRender(Gfx drawContext, DeltaTracker tickCounter) {
 		long hudStart = System.nanoTime();
 		drawHud(drawContext, tickCounter);
 		DevLogger.INSTANCE.perf(DevLogger.PERF_HUD, System.nanoTime() - hudStart);
 	}
 
-	private void drawHud(DrawContext drawContext, RenderTickCounter tickCounter) {
-		MinecraftClient client = MinecraftClient.getInstance();
-		if (client.options.hudHidden || client.textRenderer == null) return;
+	private void drawHud(Gfx drawContext, DeltaTracker tickCounter) {
+		Minecraft client = Minecraft.getInstance();
+		if (client.font == null) return;
 		// Each element is drawn where Settings > Move HUD put it (see HudLayout).
 		// Most important first: anything overlapping an earlier one is skipped.
-		TextRenderer font = client.textRenderer;
+		Font font = client.font;
 		long nowMillis = System.currentTimeMillis();
 		HudLayout.beginFrame();
 		// The combo timers check their own setting, and only one shows at a time.
@@ -1188,7 +1274,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		// failed/canceled swaps don't replace the last good time.
 		if (settings.cornerSwapText && lastDurationSeconds >= 0 && nowMillis - lastSwapMillis < RESULT_DISPLAY_MS) {
 			HudLayout.draw(drawContext, font, HudLayout.Element.LAST_SWAP,
-					Text.literal(String.format("Last Swap: %.3fs", lastDurationSeconds)));
+					Component.literal(String.format("Last Swap: %.3fs", lastDurationSeconds)));
 		}
 	}
 }

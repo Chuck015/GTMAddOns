@@ -1,7 +1,7 @@
 package com.example.gtmaddons.gui;
 
-import net.minecraft.client.font.TextRenderer;
-import net.minecraft.client.gui.DrawContext;
+import com.example.gtmaddons.compat.Gfx;
+import net.minecraft.client.gui.Font;
 
 import java.util.List;
 
@@ -77,12 +77,12 @@ final class Panels {
 	}
 
 	/** Draws the panels top-down from (x, y), w wide. */
-	static void drawColumn(DrawContext context, TextRenderer font, int x, int y, int w, List<Section> sections, int accent) {
+	static void drawColumn(Gfx context, Font font, int x, int y, int w, List<Section> sections, int accent) {
 		for (Section section : sections) {
 			int h = section.height();
 			Ui.panel(context, x, y, w, h, accent);
 			// Same title style as the overview cards: bold caps in the category's accent.
-			context.drawTextWithShadow(font, net.minecraft.text.Text.literal(Ui.fit(font, section.title().toUpperCase(java.util.Locale.ROOT), w - 2 * PAD)).formatted(net.minecraft.util.Formatting.BOLD), x + PAD, y + 6, accent);
+			context.text(font, net.minecraft.network.chat.Component.literal(Ui.fit(font, section.title().toUpperCase(java.util.Locale.ROOT), w - 2 * PAD)).withStyle(net.minecraft.ChatFormatting.BOLD), x + PAD, y + 6, accent);
 			int rowY = y + HEADER + 2;
 			for (Row row : section.rows()) {
 				drawRow(context, font, row, x + PAD, rowY, w - 2 * PAD);
@@ -92,25 +92,25 @@ final class Panels {
 		}
 	}
 
-	private static void drawRow(DrawContext context, TextRenderer font, Row row, int x, int y, int w) {
+	private static void drawRow(Gfx context, Font font, Row row, int x, int y, int w) {
 		switch (row) {
 			case Stat s -> {
-				int valueWidth = font.getWidth(s.value());
-				context.drawTextWithShadow(font, Ui.fit(font, s.label(), w - valueWidth - 6), x, y, Ui.LABEL);
+				int valueWidth = font.width(s.value());
+				context.text(font, Ui.fit(font, s.label(), w - valueWidth - 6), x, y, Ui.LABEL);
 				Ui.textRight(context, font, s.value(), x + w, y, s.color());
 			}
 			case Meter m -> {
-				int valueWidth = font.getWidth(m.value());
-				context.drawTextWithShadow(font, Ui.fit(font, m.label(), w - valueWidth - 6), x, y, Ui.LABEL);
+				int valueWidth = font.width(m.value());
+				context.text(font, Ui.fit(font, m.label(), w - valueWidth - 6), x, y, Ui.LABEL);
 				Ui.textRight(context, font, m.value(), x + w, y, m.color());
 				Ui.bar(context, x, y + 10, w, 2, m.fraction(), m.color());
 			}
-			case Note n -> context.drawTextWithShadow(font, Ui.fit(font, n.text(), w), x, y, n.color());
+			case Note n -> context.text(font, Ui.fit(font, n.text(), w), x, y, n.color());
 			case Gap g -> { }
 			case TableRow t -> {
 				int columns = t.cells().length - 1;
 				int nameWidth = w - columns * COLUMN_W - 4;
-				context.drawTextWithShadow(font, Ui.fit(font, t.cells()[0], nameWidth), x, y, t.color());
+				context.text(font, Ui.fit(font, t.cells()[0], nameWidth), x, y, t.color());
 				for (int i = 1; i < t.cells().length; i++) {
 					Ui.textRight(context, font, t.cells()[i], x + w - (columns - i) * COLUMN_W, y, t.color());
 				}
@@ -118,10 +118,10 @@ final class Panels {
 			}
 			case TimeRow s -> {
 				context.fill(x, y + 2, x + 4, y + 6, s.color());
-				context.drawTextWithShadow(font, s.time(), x + 8, y, Ui.MUTED);
-				int timeEnd = x + 8 + font.getWidth(s.time()) + 6;
-				int valueWidth = font.getWidth(s.value());
-				context.drawTextWithShadow(font, Ui.fit(font, s.extra(), x + w - valueWidth - 6 - timeEnd), timeEnd, y, Ui.LABEL);
+				context.text(font, s.time(), x + 8, y, Ui.MUTED);
+				int timeEnd = x + 8 + font.width(s.time()) + 6;
+				int valueWidth = font.width(s.value());
+				context.text(font, Ui.fit(font, s.extra(), x + w - valueWidth - 6 - timeEnd), timeEnd, y, Ui.LABEL);
 				Ui.textRight(context, font, s.value(), x + w, y, s.color());
 			}
 		}

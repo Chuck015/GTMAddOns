@@ -1,14 +1,16 @@
 package com.example.gtmaddons.gui;
 
 import com.example.gtmaddons.GTMAddOnsClient;
-import com.example.gtmaddons.stats.PlayerStats;
+import com.example.gtmaddons.compat.Gfx;
+import com.example.gtmaddons.compat.Mc;
+import com.example.gtmaddons.compat.ModScreen;
 import com.example.gtmaddons.stats.PlayerStats.AdminPlayerInfo;
-import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.client.gui.widget.ButtonWidget;
-import net.minecraft.client.gui.widget.TextFieldWidget;
-import net.minecraft.screen.ScreenTexts;
-import net.minecraft.text.Text;
+import com.example.gtmaddons.stats.PlayerStats;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.CommonComponents;
+import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -20,7 +22,7 @@ import java.util.Map;
  * (ADMIN_UUIDS), so an account that is not one gets "HTTP 403". The mod version is the one the player's mod last sent; players
  * not seen since the backend started keeping it show "unknown".
  */
-public class AdminPlayerInfoScreen extends Screen {
+public class AdminPlayerInfoScreen extends ModScreen {
 
 	private static final int WIDTH = 260;
 	private static final int ROW = 12;
@@ -30,7 +32,7 @@ public class AdminPlayerInfoScreen extends Screen {
 	private final GTMAddOnsClient mod;
 	/** The name last typed, kept when the screen is rebuilt (a resize). */
 	private static String lastName = "";
-	private TextFieldWidget field;
+	private EditBox field;
 	private String status = null;
 	/** Opened from a player's page: look this name up straight away. */
 	private boolean autoLookup = false;
@@ -39,12 +41,12 @@ public class AdminPlayerInfoScreen extends Screen {
 	private List<PlayerStats.FlagRule> rules = null;
 	private String rulesStatus = null;
 	private int ruleScroll = 0;
-	private ButtonWidget rulesButton;
+	private Button rulesButton;
 	private final List<String[]> lines = new ArrayList<>();
 	private final List<Integer> colors = new ArrayList<>();
 
 	public AdminPlayerInfoScreen(Screen parent, GTMAddOnsClient mod) {
-		super(Text.literal("GTMAddOns - Player info (admin)"));
+		super(Component.literal("GTMAddOns - Player info (admin)"));
 		this.parent = parent;
 		this.mod = mod;
 	}
@@ -59,18 +61,18 @@ public class AdminPlayerInfoScreen extends Screen {
 	@Override
 	protected void init() {
 		int x = width / 2 - WIDTH / 2;
-		field = addDrawableChild(new TextFieldWidget(textRenderer, x, 34, WIDTH - 84, 20, Text.literal("Player name")));
+		field = addRenderableWidget(new EditBox(font, x, 34, WIDTH - 84, 20, Component.literal("Player name")));
 		field.setMaxLength(16);
-		field.setPlaceholder(Text.literal("Player name"));
-		field.setText(lastName);
-		addDrawableChild(ButtonWidget.builder(Text.literal("Look up"), b -> lookUp())
-				.dimensions(x + WIDTH - 80, 34, 80, 20).build());
-		addDrawableChild(ButtonWidget.builder(ScreenTexts.BACK, b -> close())
-				.dimensions(width / 2 - 75, height - 28, 150, 20).build());
-		addDrawableChild(ButtonWidget.builder(Text.literal("Flagged players"), b -> client.setScreen(new AdminFlaggedScreen(this, mod)))
-				.dimensions(width / 2 - 75 - 124, height - 28, 120, 20).build());
-		rulesButton = addDrawableChild(ButtonWidget.builder(Text.literal(showRules ? "Player" : "Flag rules"), b -> toggleRules())
-				.dimensions(x + WIDTH + 4, 34, 84, 20).build());
+		field.setHint(Component.literal("Player name"));
+		field.setValue(lastName);
+		addRenderableWidget(ThemedButton.create(Component.literal("Look up"), b -> lookUp())
+				.bounds(x + WIDTH - 80, 34, 80, 20).build());
+		addRenderableWidget(ThemedButton.create(CommonComponents.GUI_BACK, b -> onClose())
+				.bounds(width / 2 - 75, height - 28, 150, 20).build());
+		addRenderableWidget(ThemedButton.create(Component.literal("Stat flags"), b -> Mc.setScreen(minecraft, new AdminFlaggedScreen(this, mod)))
+				.bounds(width / 2 - 75 - 124, height - 28, 120, 20).build());
+		rulesButton = addRenderableWidget(ThemedButton.create(Component.literal(showRules ? "Player" : "Stat flag rules"), b -> toggleRules())
+				.bounds(x + WIDTH + 4, 34, 104, 20).build());
 		if (autoLookup) {
 			autoLookup = false;
 			lookUp();
@@ -79,12 +81,12 @@ public class AdminPlayerInfoScreen extends Screen {
 
 	private void toggleRules() {
 		showRules = !showRules;
-		rulesButton.setMessage(Text.literal(showRules ? "Player" : "Flag rules"));
+		rulesButton.setMessage(Component.literal(showRules ? "Player" : "Stat flag rules"));
 		ruleScroll = 0;
 		if (showRules && rules == null) {
-			rulesStatus = "Loading the flag rules...";
-			mod.fetchAdminFlagRules().whenComplete((answer, error) -> client.execute(() -> {
-				if (client.currentScreen != this) return;
+			rulesStatus = "Loading the stat flag rules...";
+			mod.fetchAdminFlagRules().whenComplete((answer, error) -> minecraft.execute(() -> {
+				if (Mc.screen(minecraft) != this) return;
 				if (error != null) {
 					rulesStatus = "Couldn't load the rules: " + Format.error(error);
 					return;
@@ -96,7 +98,7 @@ public class AdminPlayerInfoScreen extends Screen {
 	}
 
 	private void lookUp() {
-		String name = field.getText().trim();
+		String name = field.getValue().trim();
 		lastName = name;
 		if (showRules) toggleRules();
 		lines.clear();
@@ -106,8 +108,8 @@ public class AdminPlayerInfoScreen extends Screen {
 			return;
 		}
 		status = "Looking up " + name + "...";
-		mod.fetchAdminPlayerInfo(name).whenComplete((info, error) -> client.execute(() -> {
-			if (client.currentScreen != this) return;
+		mod.fetchAdminPlayerInfo(name).whenComplete((info, error) -> minecraft.execute(() -> {
+			if (Mc.screen(minecraft) != this) return;
 			if (error != null) {
 				String why = Format.error(error);
 				status = why.contains("404") ? "No player called " + name + " has used the stats server."
@@ -145,7 +147,7 @@ public class AdminPlayerInfoScreen extends Screen {
 		add("Roles", (info.dev() ? "dev " : "") + (info.admin() ? "admin " : "") + (!info.dev() && !info.admin() ? "player" : ""), TEXT);
 
 		// Flags: stats out of the norm, chosen by the backend (with a minimum sample size for each).
-		add("Flags", info.flags() == null || info.flags().isEmpty() ? "none - nothing unusual with enough data" : info.flags().size() + (info.flags().size() == 1 ? " found" : " found"),
+		add("Stat flags", info.flags() == null || info.flags().isEmpty() ? "none - nothing unusual with enough data" : info.flags().size() + (info.flags().size() == 1 ? " found" : " found"),
 				info.flags() == null || info.flags().isEmpty() ? GOOD : WARN);
 		if (info.flags() != null) {
 			for (PlayerStats.Flag flag : info.flags()) add("", (flag.level().equals("warn") ? "! " : "- ") + flag.text(), flag.level().equals("warn") ? WARN : TEXT);
@@ -161,8 +163,8 @@ public class AdminPlayerInfoScreen extends Screen {
 	}
 
 	@Override
-	public void close() {
-		client.setScreen(parent);
+	public void onClose() {
+		Mc.setScreen(minecraft, parent);
 	}
 
 	@Override
@@ -173,36 +175,37 @@ public class AdminPlayerInfoScreen extends Screen {
 	}
 
 	@Override
-	public void render(DrawContext context, int mouseX, int mouseY, float deltaTicks) {
-		super.render(context, mouseX, mouseY, deltaTicks);
-		context.drawCenteredTextWithShadow(textRenderer, title, width / 2, 14, 0xFFFFFFFF);
+	public void draw(Gfx context, int mouseX, int mouseY, float deltaTicks) {
+		context.fill(0, 0, width, height, Ui.PAGE);
+		super.draw(context, mouseX, mouseY, deltaTicks);
+		context.centeredText(font, title, width / 2, 14, 0xFFFFFFFF);
 		int x = width / 2 - WIDTH / 2 - 40;
 		int y = 68;
 		if (showRules) {
 			if (rulesStatus != null || rules == null) {
-				context.drawTextWithShadow(textRenderer, rulesStatus != null ? rulesStatus : "", x, y, 0xFFFFFF55);
+				context.text(font, rulesStatus != null ? rulesStatus : "", x, y, 0xFFFFFF55);
 				return;
 			}
 			List<String[]> rows = new ArrayList<>();
 			for (PlayerStats.FlagRule rule : rules) {
-				List<String> wrapped = Ui.wrap(textRenderer, rule.requirement(), width - x - 100);
+				List<String> wrapped = Ui.wrap(font, rule.requirement(), width - x - 100);
 				for (int j = 0; j < wrapped.size(); j++) rows.add(new String[] { j == 0 ? rule.title() : "", wrapped.get(j) });
 			}
 			int visible = Math.max(1, (height - 40 - y) / (ROW + 2));
 			ruleScroll = Math.min(ruleScroll, Math.max(0, rows.size() - visible));
 			for (int i = ruleScroll; i < rows.size() && i < ruleScroll + visible; i++) {
-				context.drawTextWithShadow(textRenderer, Ui.fit(textRenderer, rows.get(i)[0], 90), x, y, rows.get(i)[0].isEmpty() ? LABEL : WARN);
-				context.drawTextWithShadow(textRenderer, rows.get(i)[1], x + 92, y, TEXT);
+				context.text(font, Ui.fit(font, rows.get(i)[0], 90), x, y, rows.get(i)[0].isEmpty() ? LABEL : WARN);
+				context.text(font, rows.get(i)[1], x + 92, y, TEXT);
 				y += ROW + 2;
 			}
 			return;
 		}
 		if (status != null) {
-			context.drawCenteredTextWithShadow(textRenderer, Text.literal(status), width / 2, y, 0xFFFFFF55);
+			context.centeredText(font, Component.literal(status), width / 2, y, 0xFFFFFF55);
 		}
 		for (int i = 0; i < lines.size(); i++) {
-			context.drawTextWithShadow(textRenderer, lines.get(i)[0], x, y, LABEL);
-			context.drawTextWithShadow(textRenderer, Ui.fit(textRenderer, lines.get(i)[1], width - x - 100), x + 92, y, colors.get(i));
+			context.text(font, lines.get(i)[0], x, y, LABEL);
+			context.text(font, Ui.fit(font, lines.get(i)[1], width - x - 100), x + 92, y, colors.get(i));
 			y += ROW + 2;
 		}
 	}
