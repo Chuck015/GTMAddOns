@@ -49,4 +49,13 @@ public final class Mc {
 	public static float masterVolume(Minecraft client) {
 		return (float) client.options.getFinalSoundSourceVolume(SoundSource.MASTER);
 	}
+
+	/** The entity a motion packet is for, and the motion it sets (blocks per tick). */
+	public static int motionEntity(net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket packet) {
+		return packet.getId();
+	}
+
+	public static net.minecraft.world.phys.Vec3 motion(net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket packet) {
+		return packet.getMovement();
+	}
 }

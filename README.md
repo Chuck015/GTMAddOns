@@ -81,6 +81,12 @@ server, tied to your Minecraft username and UUID:
 - totals per gun name: shots fired, hits, headshots and kills, plus for
   movement guns your average and best speed right after a shot
 - melee combo totals
+- extra tracking: numbers per fight from tracking rules the stats server
+  sends (for example how long after a melee hit your cooldown clears).
+  The rules are data, not code, and only produce counts and times from
+  game events the mod already sees; message text is never sent. You can
+  see the active rules and switch them off under Mods > Misc > Extra
+  tracking
 
 The server keeps each player's **last 100 fights**; older ones are
 deleted as new ones come in. The menus show stats over the last 25, 50 or

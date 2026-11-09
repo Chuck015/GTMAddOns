@@ -15,6 +15,7 @@ public enum DevFilter {
 	AIM(Group.GENERAL, "Crosshair aim", "Where your crosshair ray went at each shot: first block and every player it crosses"),
 	DAMAGE(Group.GENERAL, "Damage & health", "Damage events and who caused them, entity status events, and health changes after a shot"),
 	SOUNDS(Group.GENERAL, "Sounds", "Every sound the server plays, with its distance from you"),
+	TRACERS(Group.GENERAL, "Gun tracers", "Each run of particles shaped like a gun tracer: particle types and their settings, length, direction, speed and the likely shooter, to tell GTM's legacy and new tracers apart"),
 	PARTICLES(Group.GENERAL, "Particles", "Particle counts for each burst"),
 	TITLES(Group.GENERAL, "Titles", "Titles and subtitles (WASTED, headshot marker...)"),
 	MESSAGES(Group.GENERAL, "Chat & action bar", "Every chat and action-bar message, spelled out with fonts"),

@@ -24,6 +24,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.example.gtmaddons.probe.Probes;
+import com.example.gtmaddons.probe.Remote;
 
 /**
  * GTM melee combos, worked out from the dev log (2026-09-26/27):
@@ -72,6 +74,12 @@ public final class ComboTracker {
 	public static final ComboTracker INSTANCE = new ComboTracker();
 
 	private static final long LOCK_NANOS = 700_000_000L;
+	/** The damage type of a hit with whatever is in hand (guns too, on GTM). */
+	private static final String MELEE_DAMAGE_TYPE = "minecraft:player_attack";
+	/** Further apart than this (blocks, between the two players), a hit is not melee: vanilla reach is 3, the rest allows for lag and fast flying. */
+	private static final double MELEE_RANGE_BLOCKS = 10.0;
+	/** Thrown items: not melee weapons even though nothing else rules them out. */
+	private static final java.util.List<String> THROWABLES = java.util.List.of("grenade", "molotov", "bomb", "c4", "flashbang", "smoke", "snowball", "pearl", "potion", "egg");
 	/** Hit-again cooldown for a weapon whose real cooldown hasn't been seen yet. */
 	private static final int HIT_COOLDOWN_TICKS = 10;
 	private static final long TICK_NANOS = 50_000_000L;
@@ -130,8 +138,78 @@ public final class ComboTracker {
 	/** Cooldown length (ticks) the server last set for each weapon's cooldown group. */
 	private final Map<Identifier, Integer> cooldownTicks = new HashMap<>();
 
+	/**
+	 * The combo timing numbers of one fight, uploaded with it for everyone running the mod (information only, shown in Raw info), so
+	 * GTM's combo rules can be worked out from many players instead of one dev log. Times in ms:
+	 *   locks / hits          melee hits on you / by you;
+	 *   lock_blanks / recover_blanks   your blank swings while combo'd / on a recovering target;
+	 *   lock_first            how long the lock was, from the first "Combo'd" message after a hit (time since the hit + time left);
+	 *   lock_drop             between two "Combo'd" messages of one lock, how much more the time left fell than the time that passed
+	 *                         (what a blank takes off);
+	 *   recover_first, recover_drop   the same for "Target recovering" after your hit;
+	 *   clear                 when the server ended your weapon's cooldown (a 0-tick cooldown packet), measured from your hit.
+	 * Each measured value is kept as count, sum, min and max.
+	 */
+	public static final class Stats {
+		int locks, hits, lockBlanks, recoverBlanks;
+		final Sample lockFirst = new Sample(), lockDrop = new Sample(), recoverFirst = new Sample(), recoverDrop = new Sample(), clear = new Sample();
+
+		void addTo(com.google.gson.JsonObject o) {
+			o.addProperty("combo_locks", locks);
+			o.addProperty("combo_hits", hits);
+			o.addProperty("combo_lock_blanks", lockBlanks);
+			o.addProperty("combo_recover_blanks", recoverBlanks);
+			lockFirst.addTo(o, "combo_lock_first");
+			lockDrop.addTo(o, "combo_lock_drop");
+			recoverFirst.addTo(o, "combo_recover_first");
+			recoverDrop.addTo(o, "combo_recover_drop");
+			clear.addTo(o, "combo_clear");
+		}
+	}
+
+	/** Count, sum, min and max of one measured time (ms). */
+	static final class Sample {
+		int n;
+		double sum, min = Double.MAX_VALUE, max = -Double.MAX_VALUE;
+
+		void add(long nanos) {
+			double ms = nanos / 1_000_000.0;
+			n++;
+			sum += ms;
+			min = Math.min(min, ms);
+			max = Math.max(max, ms);
+		}
+
+		void addTo(com.google.gson.JsonObject o, String key) {
+			o.addProperty(key + "_n", n);
+			if (n == 0) return;
+			o.addProperty(key + "_sum", Math.round(sum));
+			o.addProperty(key + "_min", Math.round(min));
+			o.addProperty(key + "_max", Math.round(max));
+		}
+	}
+
+	private Stats fight = null;
+	/** The last "Combo'd" / "Target recovering" message's time and time left, for the drop between two of them. */
+	private long lastLockMsgNanos = -1L, lastLockLeft = 0L, lastRecoverMsgNanos = -1L, lastRecoverLeft = 0L;
+
+	public void onFightStart() {
+		fight = new Stats();
+	}
+
+	public Stats onFightEnd() {
+		Stats done = fight;
+		fight = null;
+		return done;
+	}
+
+	public void onFightDrop() {
+		fight = null;
+	}
+
 	/** Melee clicks not yet known to be a hit, a blank or a miss, oldest first. */
-	private final ArrayDeque<Long> pendingClicks = new ArrayDeque<>();
+	/** Each pending click: { when (nanos), where it was aimed (MeleeAimTracker.NO_TARGET / OFF_TARGET / ON_TARGET) }. */
+	private final ArrayDeque<long[]> pendingClicks = new ArrayDeque<>();
 	private long lastMyHitNanos = -1L;
 	private int clicksSinceHit = 0, blanksSinceHit = 0, blanksSinceLock = 0;
 	/** The full length of a timer as the server's first message after it started gave it (elapsed + time left). */
@@ -146,16 +224,27 @@ public final class ComboTracker {
 
 	// ---- Hits ----
 
-	public void onDamage(int targetId, int causeId) {
+	/**
+	 * A damage event. Only a melee hit counts: a direct player attack (damage type player_attack, dealt by the player themselves, not
+	 * a projectile, fire or an explosion they caused), by someone within MELEE_RANGE_BLOCKS of their target, with a melee weapon in
+	 * hand (isMeleeItem). GTM's guns also deal player_attack damage, so the held item and the distance are what tell them apart.
+	 */
+	public void onDamage(int targetId, int causeId, int directId, String damageType) {
 		Minecraft client = Minecraft.getInstance();
 		LocalPlayer me = client.player;
 		if (me == null || client.level == null || targetId == causeId) return;
+		if (!MELEE_DAMAGE_TYPE.equals(damageType) || directId != causeId) return;
+		Entity other = client.level.getEntity(targetId == me.getId() ? causeId : targetId);
+		if (other == null || other.distanceTo(me) > Remote.num("melee_range", MELEE_RANGE_BLOCKS)) return;
 		long now = System.nanoTime();
 
 		if (targetId == me.getId()) {
 			Entity attacker = client.level.getEntity(causeId);
 			if (!(attacker instanceof Player player) || !isMeleeItem(player.getMainHandItem())) return;
 			lockStartNanos = now;
+			lastLockMsgNanos = -1L;
+			if (fight != null) fight.locks++;
+			if (Probes.wants("melee_hit_me")) Probes.emit("melee_hit_me", "item", Probes.itemId(player.getMainHandItem()), "dist", Probes.round(other.distanceTo(me)), "move", MoveStates.stateName(client));
 			long learned = learned(lockSamples);
 			lockEndNanos = now + (learned > 0 ? learned : LOCK_NANOS);
 			blanksSinceLock = 0;
@@ -171,8 +260,12 @@ public final class ComboTracker {
 		} else if (causeId == me.getId()) {
 			Entity victim = client.level.getEntity(targetId);
 			if (!(victim instanceof Player player) || !isMeleeItem(me.getMainHandItem())) return;
+			long gapBefore = lastMyHitNanos >= 0 ? now - lastMyHitNanos : -1L;
+			int clicksBefore = clicksSinceHit, blanksBefore = blanksSinceHit;
 			onMyHit(me, player, now);
 			startHitCooldown(me, now);
+			if (Probes.wants("melee_hit")) Probes.emit("melee_hit", "item", Probes.itemId(me.getMainHandItem()), "group", hitGroup != null ? hitGroup.toString() : null,
+					"dist", Probes.round(other.distanceTo(me)), "gap_ms", gapBefore >= 0 ? Probes.round(gapBefore / 1_000_000.0) : null, "clicks", clicksBefore, "blanks", blanksBefore);
 			// You landed a hit, so their combo on you (if any) is broken.
 			// No combo to break and none of yours to hold: a first hit.
 			Chain broken = enemyChains.remove(targetId);
@@ -187,9 +280,10 @@ public final class ComboTracker {
 	/** Ends combos that have gone quiet, or whose players are gone or dead. */
 	public void onFrame(Minecraft client) {
 		long now = System.nanoTime();
-		while (!pendingClicks.isEmpty() && now - pendingClicks.peekFirst() > CLICK_RESOLVE_NANOS) {
-			pendingClicks.removeFirst();
+		while (!pendingClicks.isEmpty() && now - pendingClicks.peekFirst()[0] > CLICK_RESOLVE_NANOS) {
+			long[] click = pendingClicks.removeFirst();
 			ClickTracker.INSTANCE.onMeleeMiss();
+			MeleeAimTracker.INSTANCE.onClickOutcome((int) click[1], 2);
 		}
 		boolean iAmDead = client.player == null || client.player.isDeadOrDying();
 		expire(enemyChains, true, now, client, iAmDead);
@@ -237,6 +331,7 @@ public final class ComboTracker {
 	public void onCooldown(Identifier group, int ticks) {
 		if (ticks > 0) cooldownTicks.put(group, ticks);
 		long now = System.nanoTime();
+		if (ticks == 0 && fight != null && hitStartNanos >= 0 && group.equals(hitGroup) && now - hitStartNanos <= CHAIN_TIMEOUT_NANOS) fight.clear.add(now - hitStartNanos);
 		if (hitStartNanos < 0 || !group.equals(hitGroup) || now > hitEndNanos) return;
 		boolean fromHit = now - hitStartNanos <= COOLDOWN_MATCH_NANOS;
 		logTiming(String.format("COOLDOWN %d ticks (%s) | %s after your hit | timer had %s left", ticks, ms(ticks * TICK_NANOS), ms(now - hitStartNanos), ms(hitEndNanos - now)), false);
@@ -259,17 +354,32 @@ public final class ComboTracker {
 	 */
 	public boolean onActionBar(Component text) {
 		String message = text.getString();
-		Matcher combo = COMBO_MESSAGE.matcher(message);
-		if (combo.find()) {
-			onServerLock((long) (Double.parseDouble(combo.group(1)) * 1_000_000_000L));
+		Probes.onText("action_bar", message);
+		// The patterns can be replaced by the remote config (Remote) if GTM rewords its messages; a bad one falls back to the mod's own.
+		long left = seconds(Remote.pattern("combo_msg", COMBO_MESSAGE), COMBO_MESSAGE, message);
+		if (left >= 0) {
+			Probes.emit("combo_msg", "left_ms", left / 1_000_000.0);
+			onServerLock(left);
 			return timersEnabled;
 		}
-		Matcher recovering = RECOVERING_MESSAGE.matcher(message);
-		if (recovering.find()) {
-			onServerRecovering((long) (Double.parseDouble(recovering.group(1)) * 1_000_000_000L));
+		left = seconds(Remote.pattern("recovering_msg", RECOVERING_MESSAGE), RECOVERING_MESSAGE, message);
+		if (left >= 0) {
+			Probes.emit("recover_msg", "left_ms", left / 1_000_000.0);
+			onServerRecovering(left);
 			return timersEnabled;
 		}
 		return false;
+	}
+
+	/** The time in a message (nanoseconds), or -1 if it isn't one; a remote pattern that fails falls back to the built-in one. */
+	private static long seconds(Pattern pattern, Pattern fallback, String message) {
+		try {
+			Matcher m = pattern.matcher(message);
+			if (m.find()) return (long) (Double.parseDouble(m.group(1)) * 1_000_000_000L);
+			return -1L;
+		} catch (RuntimeException bad) {
+			return pattern == fallback ? -1L : seconds(fallback, fallback, message);
+		}
 	}
 
 	/** You swung while locked: the server's time left replaces the timer's when they differ. */
@@ -284,8 +394,15 @@ public final class ComboTracker {
 			lockEndNanos = now + left;
 		} else {
 			if (blanksSinceLock == 0) sample(lockSamples, now - lockStartNanos + left);
+			if (fight != null) {
+				if (blanksSinceLock == 0) fight.lockFirst.add(now - lockStartNanos + left);
+				else if (lastLockMsgNanos >= 0) fight.lockDrop.add((lastLockLeft - left) - (now - lastLockMsgNanos));
+			}
 			if (Math.abs(lockEndNanos - now - left) > MESSAGE_SLACK_NANOS) lockEndNanos = now + left;
 		}
+		if (fight != null) fight.lockBlanks++;
+		lastLockMsgNanos = now;
+		lastLockLeft = left;
 		blanksSinceLock++;
 	}
 
@@ -300,8 +417,15 @@ public final class ComboTracker {
 			hitEndNanos = now + left;
 		} else {
 			if (blanksSinceHit == 0 && hitGroup != null) sample(hitSamples.computeIfAbsent(hitGroup, g -> new ArrayDeque<>()), now - hitStartNanos + left);
+			if (fight != null) {
+				if (blanksSinceHit == 0) fight.recoverFirst.add(now - hitStartNanos + left);
+				else if (lastRecoverMsgNanos >= 0) fight.recoverDrop.add((lastRecoverLeft - left) - (now - lastRecoverMsgNanos));
+			}
 			if (Math.abs(hitEndNanos - now - left) > MESSAGE_SLACK_NANOS) hitEndNanos = now + left;
 		}
+		if (fight != null) fight.recoverBlanks++;
+		lastRecoverMsgNanos = now;
+		lastRecoverLeft = left;
 		blanksSinceHit++;
 	}
 
@@ -310,22 +434,31 @@ public final class ComboTracker {
 	/** A left click (ClickTracker). Melee ones wait to hear what they did. */
 	void onClick() {
 		if (!holdingMelee()) return;
-		pendingClicks.addLast(System.nanoTime());
+		pendingClicks.addLast(new long[] { System.nanoTime(), MeleeAimTracker.INSTANCE.aimForClick() });
 		clicksSinceHit++;
 	}
 
 	private void resolveBlank() {
-		if (pendingClicks.pollFirst() != null) ClickTracker.INSTANCE.onMeleeBlank();
+		long[] click = pendingClicks.pollFirst();
+		if (click == null) return;
+		ClickTracker.INSTANCE.onMeleeBlank();
+		MeleeAimTracker.INSTANCE.onClickOutcome((int) click[1], 1);
 	}
 
 	/** You landed a melee hit: what led up to it, before the timer restarts. */
 	private void onMyHit(LocalPlayer me, Player victim, long now) {
-		if (pendingClicks.pollFirst() != null) ClickTracker.INSTANCE.onMeleeHit();
+		long[] click = pendingClicks.pollFirst();
+		if (click != null) {
+			ClickTracker.INSTANCE.onMeleeHit();
+			MeleeAimTracker.INSTANCE.onClickOutcome((int) click[1], 0);
+		}
 		long gap = lastMyHitNanos >= 0 ? now - lastMyHitNanos : -1L;
 		if (gap > 0 && gap <= CHAIN_TIMEOUT_NANOS) ClickTracker.INSTANCE.onHitGap(gap / 1_000_000.0, blanksSinceHit > 0);
 		logTiming(String.format("HIT %s with %s | %s since your last hit | %d clicks since, %d blank | timer had %s left", name(victim), me.getMainHandItem().getHoverName().getString(),
 				gap > 0 ? ms(gap) : "first", clicksSinceHit, blanksSinceHit, hitStartNanos >= 0 ? ms(hitEndNanos - now) : "none"), true);
 		lastMyHitNanos = now;
+		lastRecoverMsgNanos = -1L;
+		if (fight != null) fight.hits++;
 		clicksSinceHit = blanksSinceHit = 0;
 	}
 
@@ -410,13 +543,17 @@ public final class ComboTracker {
 	 *     single-number one like "Stun Gun «1»" and "Flamethrower «8»" (which the old
 	 *     "n/max" test let through as if they were swords);
 	 *   - a wingsuit or jetpack, and food or other consumables (a "Burger");
+	 *   - thrown items (THROWABLES: grenades, molotovs, ...);
 	 * everything else GTM lets you hit with (Katana, Golf Club, Chanclas...) counts.
 	 * From GTM's dev logs, where guns also deal "player_attack" damage, so the damage type
 	 * can't tell a gun hit from a melee hit - the held item is what does.
 	 */
 	public static boolean isMeleeItem(ItemStack stack) {
 		if (stack.isEmpty()) return false;
-		if (hasAmmoReadout(stack.getHoverName().getString())) return false;
+		String name = stack.getHoverName().getString();
+		if (hasAmmoReadout(name)) return false;
+		String lower = name.toLowerCase(java.util.Locale.ROOT);
+		for (String thrown : THROWABLES) if (lower.contains(thrown)) return false;
 		if (PvpCategory.isWingsuit(stack) || PvpCategory.isJetpack(stack) || PvpCategory.isWornJetpack(stack)) return false;
 		return !stack.has(DataComponents.FOOD) && !stack.has(DataComponents.CONSUMABLE);
 	}

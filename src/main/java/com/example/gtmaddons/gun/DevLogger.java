@@ -69,6 +69,7 @@ public final class DevLogger {
 	private boolean saveLog = true;
 	private final MovementDebugger movement = new MovementDebugger(this);
 	private final SwingDebugger swing = new SwingDebugger(this);
+	private final TracerLogger tracers = new TracerLogger(this);
 	private final MeleeDamageDebugger melee = new MeleeDamageDebugger(this);
 	private final NetLauncherDebugger netLauncher = new NetLauncherDebugger(this);
 	private final NearLogger near = new NearLogger(this);
@@ -230,6 +231,7 @@ public final class DevLogger {
 		if (windowEndNanos != 0L && System.nanoTime() >= windowEndNanos) flushWindow();
 		movement.onFrame(client);
 		if (wants(DevFilter.SWINGS)) swing.onFrame(client);
+		if (wants(DevFilter.TRACERS)) tracers.onFrame(client);
 		if (wants(DevFilter.MELEE_DAMAGE)) melee.onFrame(client);
 		if (wants(DevFilter.NET_LAUNCHER)) netLauncher.onFrame(client);
 		near.onFrame();
@@ -387,6 +389,7 @@ public final class DevLogger {
 		Minecraft client = Minecraft.getInstance();
 		int me = client.player != null ? client.player.getId() : -1;
 		boolean involvesMe = entityId == me || causeId == me;
+		if (wants(DevFilter.SWINGS)) swing.onAnyDamage(entityId, causeId);
 		if (involvesMe) {
 			openWindow(client);
 			if (causeId == me && entityId != me && wants(DevFilter.SWINGS)) swing.onHit(entityName(entityId));
@@ -423,6 +426,7 @@ public final class DevLogger {
 	public void onActionBar(Component text) {
 		if (!enabled) return;
 		near.onMessage(text, true);
+		if (wants(DevFilter.SWINGS)) swing.onActionBar(text.getString());
 		String lower = text.getString().toLowerCase(java.util.Locale.ROOT);
 		if (lower.contains("combo") || lower.contains("recovering")) openWindow(Minecraft.getInstance());
 		if (!windowOpen() || !wants(DevFilter.MESSAGES)) return;
@@ -460,6 +464,11 @@ public final class DevLogger {
 		if (!windowOpen() || !wants(DevFilter.SOUNDS)) return;
 		add(String.format("SOUND  %s  category=%s  volume=%.2f  pitch=%.2f  from entity %s",
 				soundId, category, volume, pitch, entityName(entityId)));
+	}
+
+	/** Every particle packet (game thread), for the gun tracer runs. */
+	public void onParticlePacket(net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket packet) {
+		if (wants(DevFilter.TRACERS)) tracers.onPacket(Minecraft.getInstance(), packet);
 	}
 
 	public void onParticle(String particleId, int count) {
@@ -556,6 +565,13 @@ public final class DevLogger {
 		if (!wants(DevFilter.FIGHTS)) return;
 		chat("Movement: " + description, ChatFormatting.GRAY);
 		writeBlock("FIGHT MOVEMENT", List.of(description, json));
+	}
+
+	/** A finished fight's probe results (Probes: the remote config's tracking rules): a chat line and a block in the log. */
+	public void fightProbes(String json) {
+		if (!wants(DevFilter.FIGHTS)) return;
+		chat("Probes: " + json, ChatFormatting.GRAY);
+		writeBlock("FIGHT PROBES", List.of(json));
 	}
 
 	/** A finished fight's opponent, as classified from their gear (see GearTracker): a chat line and a block in the log. */

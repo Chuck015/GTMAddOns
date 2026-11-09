@@ -102,8 +102,10 @@ public final class ClickTracker {
 		Options options = Minecraft.getInstance().options;
 		if (options == null) return;
 		if (key.equals(((KeyMappingAccessor) options.keyAttack).gtmaddons$key())) {
+			com.example.gtmaddons.probe.Probes.emit("click", "button", "left");
 			onLeftClick();
 		} else if (key.equals(((KeyMappingAccessor) options.keyUse).gtmaddons$key())) {
+			com.example.gtmaddons.probe.Probes.emit("click", "button", "right");
 			if (fight != null) fight.right++;
 		}
 	}

@@ -83,15 +83,32 @@ public final class SwapSession {
 	public void end() {
 		recording = false;
 		long elapsed = System.currentTimeMillis() - startedAtMillis;
-		SwapSummary s = SwapSummary.of(List.copyOf(records));
-		send(bar("Swap Info", ChatFormatting.GOLD));
+		report(List.copyOf(records), "Swap Info", Component.literal(" Recorded ").withStyle(ChatFormatting.GRAY).append(white(duration(elapsed))),
+				" Recorded " + duration(elapsed) + " - no swaps were made.");
+	}
+
+	/**
+	 * Swap recording's auto playback: a fight that was recorded for the stats (it ended in a kill or a death, see FightTracker) prints
+	 * the averages of the swaps made in it, laid out like the recording's. Fights with no swaps print nothing.
+	 */
+	public void sendFight(FightTracker.Fight fight) {
+		if (fight.swaps().isEmpty()) return;
+		String result = "KILL".equals(fight.outcome()) ? "Kill" : "DEATH".equals(fight.outcome()) ? "Death" : fight.outcome();
+		report(List.copyOf(fight.swaps()), "Fight Swap Info", Component.literal(" " + result + (fight.opponent() != null ? " vs " : "")).withStyle(ChatFormatting.GRAY)
+				.append(white(fight.opponent() != null ? fight.opponent() : "")).append(gray(" (" + fight.category().label + ", " + duration(fight.endedAt() - fight.startedAt()) + ")")), null);
+	}
+
+	/** The averages of these swaps in chat under this title; lead starts the first line, empty is the line for no swaps. */
+	private void report(List<SwapRecord> swaps, String title, MutableComponent lead, String empty) {
+		SwapSummary s = SwapSummary.of(swaps);
+		send(bar(title, ChatFormatting.GOLD));
 		if (s.total() == 0) {
-			send(Component.literal(" Recorded " + duration(elapsed) + " - no swaps were made.").withStyle(ChatFormatting.GRAY));
+			send(Component.literal(empty != null ? empty : " No swaps.").withStyle(ChatFormatting.GRAY));
 			send(closingBar());
 			return;
 		}
 
-		send(Component.literal(" Recorded ").withStyle(ChatFormatting.GRAY).append(white(duration(elapsed))).append(gray("  ·  ")).append(white(s.total() + (s.total() == 1 ? " swap" : " swaps")))
+		send(lead.append(gray("  ·  ")).append(white(s.total() + (s.total() == 1 ? " swap" : " swaps")))
 				.append(typeSplit(s)));
 		MutableComponent tally = Component.literal(" ").append(Component.literal("✔ " + s.successes()).withStyle(ChatFormatting.GREEN));
 		tally.append(gray("   ")).append(Component.literal("✘ " + s.failures()).withStyle(s.failures() > 0 ? ChatFormatting.RED : ChatFormatting.DARK_GRAY));

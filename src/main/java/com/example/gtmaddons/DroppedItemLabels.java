@@ -61,12 +61,17 @@ public final class DroppedItemLabels {
 		AABB around = client.player.getBoundingBox().inflate(RANGE);
 		for (ItemEntity item : client.level.getEntitiesOfClass(ItemEntity.class, around, e -> true)) {
 			ItemStack stack = item.getItem();
-			if (stack.isEmpty() || item.distanceToSqr(client.player) > RANGE * RANGE) continue;
+			if (stack.isEmpty() || item.distanceToSqr(client.player) > RANGE * RANGE || !wanted(stack)) continue;
 			Vec3 body = new Vec3(item.getX(), item.getY() + item.getBbHeight() / 2.0, item.getZ());
 			Vec3 label = new Vec3(item.getX(), item.getY() + item.getBbHeight() + LABEL_RISE, item.getZ());
 			if (!clear(client, eyes, body) || !clear(client, eyes, label)) continue;
 			visible.put(item.getId(), stack.getCount() > 1 ? stack.getHoverName().copy().append(" x" + stack.getCount()) : stack.getHoverName());
 		}
+	}
+
+	/** With the item filter on, only items whose name contains a listed name (ignoring case and colours). */
+	private static boolean wanted(ItemStack stack) {
+		return !settings.droppedItemFilterOn || DroppedItemSizes.matches(settings.droppedItemFilter, stack);
 	}
 
 	/** True when no block with a collision shape is between the two points. */

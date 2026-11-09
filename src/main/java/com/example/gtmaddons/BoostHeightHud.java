@@ -18,12 +18,32 @@ public final class BoostHeightHud {
 
 	/** Boosting needs your Y below this. */
 	public static final double BOOST_MAX_Y = 200.0;
+
+	private static Settings settings;
+	/** When you were last gliding. */
+	private static long lastGlideNanos = Long.MIN_VALUE / 2;
+
 	private BoostHeightHud() {}
 
-	/** The line to show (drawn where HudLayout puts it), or null when not gliding. */
+	public static void init(Settings modSettings) {
+		settings = modSettings;
+	}
+
+	/** Gliding now, or within the set number of seconds after (Boost height limit's "Show after gliding"). */
+	public static boolean shown(LocalPlayer player) {
+		long now = System.nanoTime();
+		if (player.isFallFlying()) {
+			lastGlideNanos = now;
+			return true;
+		}
+		int linger = settings != null ? settings.boostLingerSeconds : 0;
+		return now - lastGlideNanos <= linger * 1_000_000_000L;
+	}
+
+	/** The line to show (drawn where HudLayout puts it), or null when not gliding (and not within the seconds after). */
 	public static Component text(Minecraft client) {
 		LocalPlayer player = client.player;
-		if (player == null || !player.isFallFlying()) return null;
+		if (player == null || !shown(player)) return null;
 
 		double height = player.getY();
 		boolean canBoost = height < BOOST_MAX_Y;

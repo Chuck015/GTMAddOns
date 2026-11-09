@@ -1,5 +1,8 @@
 package com.example.gtmaddons;
 
+import com.example.gtmaddons.probe.Probes;
+import com.example.gtmaddons.probe.Remote;
+
 import com.example.gtmaddons.compat.Mc;
 import net.minecraft.client.Minecraft;
 import net.minecraft.util.Mth;
@@ -34,6 +37,12 @@ public final class MouseTracker {
 		public double ms, mouseDeg, yawDeg, pitchDeg, turnDeg, otherDeg, movingMs, stillMs, peakDps;
 		/** How you clicked over the same fight (ClickTracker), sent with these numbers. */
 		public ClickTracker.Stats clicks;
+		/** How well you kept your crosshair on your melee target over the same fight (MeleeAimTracker). */
+		public MeleeAimTracker.Stats aim;
+		/** The combo timing numbers of the same fight (ComboTracker.Stats). */
+		public ComboTracker.Stats combo;
+		/** The fight's probe results (Probes: rules from the remote config), sent as the fight's "probes", not in mouse_input. */
+		public com.google.gson.JsonObject probes;
 		public int frames, mouseFrames, otherFrames, fastMoves;
 		private boolean fast = false;
 
@@ -88,6 +97,8 @@ public final class MouseTracker {
 			o.addProperty("peak_dps", r(peakDps));
 			o.addProperty("fast_moves", fastMoves);
 			if (clicks != null) clicks.addTo(o);
+			if (aim != null) aim.addTo(o);
+			if (combo != null) combo.addTo(o);
 			return o;
 		}
 	}
@@ -103,7 +114,11 @@ public final class MouseTracker {
 
 	public void onFightStart() {
 		fight = new Stats();
-		ClickTracker.INSTANCE.onFightStart();
+		// The built-in per-fight trackers can be switched off by the remote config (Remote) without a mod update.
+		if (Remote.on("click_stats", true)) ClickTracker.INSTANCE.onFightStart();
+		if (Remote.on("aim_stats", true)) MeleeAimTracker.INSTANCE.onFightStart();
+		if (Remote.on("combo_stats", true)) ComboTracker.INSTANCE.onFightStart();
+		Probes.onFightStart();
 	}
 
 	/** The fight ended: its numbers (null if none were being collected). */
@@ -111,13 +126,24 @@ public final class MouseTracker {
 		Stats done = fight;
 		fight = null;
 		ClickTracker.Stats clicks = ClickTracker.INSTANCE.onFightEnd();
-		if (done != null) done.clicks = clicks;
+		MeleeAimTracker.Stats aim = MeleeAimTracker.INSTANCE.onFightEnd();
+		ComboTracker.Stats combo = ComboTracker.INSTANCE.onFightEnd();
+		com.google.gson.JsonObject probes = Probes.onFightEnd();
+		if (done != null) {
+			done.clicks = clicks;
+			done.aim = aim;
+			done.combo = combo;
+			done.probes = probes;
+		}
 		return done;
 	}
 
 	public void onFightDrop() {
 		fight = null;
 		ClickTracker.INSTANCE.onFightDrop();
+		MeleeAimTracker.INSTANCE.onFightDrop();
+		ComboTracker.INSTANCE.onFightDrop();
+		Probes.onFightDrop();
 	}
 
 	/** Called by EntityLookMixin for every mouse movement the game applies to an entity; only the local player's counts. */

@@ -187,6 +187,25 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		InventoryTransparency.init(settings);
 		com.example.gtmaddons.gui.FightViews.init(settings);
 		OldSneaking.init(settings);
+		BetterSwing.init(settings);
+		BoostHeightHud.init(settings);
+		BoostLimitView.init(settings);
+		GunTracers.init(settings);
+		DroppedItemSizes.init(settings);
+		ChestHotkeys.init(settings);
+		com.example.gtmaddons.probe.Remote.init(settings);
+		MenuKey.init(settings);
+		// Swap information became one switch over its parts: on for anyone who already used one of them.
+		if (!settings.swapInfoMigrated) {
+			settings.swapInfo = settings.swapRecordButton || settings.swapDebug || settings.swapAutoPlayback;
+			settings.swapInfoMigrated = true;
+			settings.save();
+		}
+		NearList.showJobTags = settings.nearJobTags;
+		CombatTracker.INSTANCE.setOnTagEnded(() -> {
+			if (settings.combatTimerSound) Minecraft.getInstance().getSoundManager().play(
+					net.minecraft.client.resources.sounds.SimpleSoundInstance.forUI(net.minecraft.sounds.SoundEvents.NOTE_BLOCK_PLING, 1.5f));
+		});
 		stats.setShowUsers(settings.showModUsers);
 		Hooks.onHud(this::onHudRender);
 		ClientCommandRegistrationCallback.EVENT.register(this::registerCommands);
@@ -197,6 +216,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			Minecraft client = Minecraft.getInstance();
 			long frameStart = System.nanoTime();
 			momentumFrame(client);
+			MenuKey.onFrame(client, this);
 			ModUsers.onFrame(client);
 			// Before CombatTracker, so a death is seen before it clears the tag.
 			GearTracker.INSTANCE.onFrame(client);
@@ -204,6 +224,9 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			GunSounds.INSTANCE.setPlayer(client.player != null, client.player != null ? client.player.getX() : 0.0, client.player != null ? client.player.getY() : 0.0, client.player != null ? client.player.getZ() : 0.0);
 			MovementInputTracker.INSTANCE.onFrame(client);
 			MouseTracker.INSTANCE.onFrame(client);
+			MeleeAimTracker.INSTANCE.onFrame(client);
+			MoveStates.INSTANCE.onFrame(client);
+			com.example.gtmaddons.probe.ProbeWatch.onFrame(client);
 			FightTracker.INSTANCE.onFrame(client);
 			CombatTracker.INSTANCE.onFrame(client);
 			ShotTracker.INSTANCE.onFrame(client);
@@ -241,9 +264,13 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		// Stats are only recorded during fights (combat tag to kill or death):
 		// FightTracker holds them, then hands each finished fight over.
 		ShotTracker.INSTANCE.addListener(FightTracker.INSTANCE::addShot);
+		ShotTracker.INSTANCE.addListener(MoveStates.INSTANCE::onShotResult);
 		ComboTracker.INSTANCE.addListener(FightTracker.INSTANCE::addCombo);
 		FightTracker.INSTANCE.addListener(stats::submitFight);
 		FightTracker.INSTANCE.addListener(SessionStats.INSTANCE::onFight);
+		FightTracker.INSTANCE.addListener(fight -> {
+			if (settings.swapInfo && settings.swapAutoPlayback) Minecraft.getInstance().execute(() -> SwapSession.INSTANCE.sendFight(fight));
+		});
 		ShotTracker.INSTANCE.addListener(DevLogger.INSTANCE::onShotResult);
 		GunSounds.INSTANCE.init(settings);
 		HudLayout.init(settings);
@@ -261,7 +288,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
 			CombatTracker.INSTANCE.onScreenOpened(screen);
 			DevLogger.INSTANCE.onScreenOpened(screen);
-			if (settings.swapRecordButton && screen instanceof InventoryScreen) addSwapRecordButton(screen);
+			if (settings.swapInfo && settings.swapRecordButton && screen instanceof InventoryScreen) addSwapRecordButton(screen);
 			// AFTER_INIT also fires when the open screen is resized. Fabric
 			// clears the screen's listeners then, so re-register them, but
 			// don't restart a swap that's already in progress.
@@ -378,7 +405,13 @@ public class GTMAddOnsClient implements ClientModInitializer {
 
 	public void setCobwebTransparency(int percent) {
 		settings.cobwebTransparency = Math.max(0, Math.min(100, percent));
+		if (settings.cobwebTransparency > 0) settings.cobwebTransparencyLast = settings.cobwebTransparency;
 		settings.save();
+	}
+
+	/** The settings row's switch: off is 0%, on is the last percentage the slider had. */
+	public void setCobwebTransparencyOn(boolean on) {
+		setCobwebTransparency(on ? Math.max(1, settings.cobwebTransparencyLast) : 0);
 	}
 
 	public int getInventoryTransparency() {
@@ -387,7 +420,13 @@ public class GTMAddOnsClient implements ClientModInitializer {
 
 	public void setInventoryTransparency(int percent) {
 		settings.inventoryTransparency = Math.max(0, Math.min(100, percent));
+		if (settings.inventoryTransparency > 0) settings.inventoryTransparencyLast = settings.inventoryTransparency;
 		settings.save();
+	}
+
+	/** The settings row's switch: off is 0%, on is the last percentage the slider had. */
+	public void setInventoryTransparencyOn(boolean on) {
+		setInventoryTransparency(on ? Math.max(1, settings.inventoryTransparencyLast) : 0);
 	}
 
 	public boolean isHideJetpackParticlesOn() {
@@ -555,6 +594,32 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		ComboTracker.INSTANCE.setTimersEnabled(on);
 	}
 
+	public boolean isBetterSwingOn() {
+		return settings.betterSwing;
+	}
+
+	public void setBetterSwingOn(boolean on) {
+		settings.betterSwing = on;
+		settings.save();
+	}
+
+	public void setNearJobTags(boolean on) {
+		settings.nearJobTags = on;
+		NearList.showJobTags = on;
+		settings.save();
+	}
+
+	/** The game's own Glint Strength (Accessibility), 0-100%: it applies to every glint, the Black Ops boots' included. */
+	public int getGlintStrength() {
+		return (int) Math.round(Minecraft.getInstance().options.glintStrength().get() * 100);
+	}
+
+	public void setGlintStrength(int percent) {
+		Minecraft client = Minecraft.getInstance();
+		client.options.glintStrength().set(Math.max(0, Math.min(100, percent)) / 100.0);
+		client.options.save();
+	}
+
 	public boolean isBoostAngleOn() {
 		return settings.boostAngle;
 	}
@@ -627,7 +692,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 			case SWAP_TIMER -> settings.showSwapTimer;
 			case LAST_SWAP -> settings.cornerSwapText;
 			case BOOST_ANGLE -> settings.boostAngle;
-			case BOOST_HEIGHT -> settings.boostHeight;
+			case BOOST_HEIGHT -> settings.boostHeight && settings.boostHeightReadout;
 			case COMBO_LOCK, COMBO_HIT -> settings.comboTimer;
 			case COMBAT_TIMER -> settings.combatTimer;
 		};
@@ -1052,7 +1117,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 	private void recordSwap(SwapRecord record) {
 		FightTracker.INSTANCE.addSwap(record);
 		SwapSession.INSTANCE.add(record);
-		if (settings.swapDebug) {
+		if (settings.swapInfo && settings.swapDebug) {
 			sendDebugReport(record);
 		}
 	}
@@ -1093,8 +1158,9 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		}
 		// The fight it was made in, or the one that started just after it (FightTracker counts the 10 s before a fight).
 		FightTracker.INSTANCE.addSwap(done);
+		com.example.gtmaddons.probe.Probes.emit("swap", "result", done.result(), "ms", done.totalMs(), "cat", done.category(), "type", done.swapType());
 		SwapSession.INSTANCE.add(done);
-		if (settings.swapDebug) {
+		if (settings.swapInfo && settings.swapDebug) {
 			sendDebugReport(done);
 		}
 	}
@@ -1266,7 +1332,7 @@ public class GTMAddOnsClient implements ClientModInitializer {
 		HudLayout.draw(drawContext, font, HudLayout.Element.COMBO_HIT, ComboTracker.INSTANCE.hitText());
 		if (settings.combatTimer) HudLayout.draw(drawContext, font, HudLayout.Element.COMBAT_TIMER, CombatTracker.INSTANCE.timerText());
 		if (settings.boostAngle) HudLayout.draw(drawContext, font, HudLayout.Element.BOOST_ANGLE, BoostAngleHud.text(client));
-		if (settings.boostHeight) HudLayout.draw(drawContext, font, HudLayout.Element.BOOST_HEIGHT, BoostHeightHud.text(client));
+		if (settings.boostHeight && settings.boostHeightReadout) HudLayout.draw(drawContext, font, HudLayout.Element.BOOST_HEIGHT, BoostHeightHud.text(client));
 		if (settings.showSwapTimer && swapTimerText != null && nowMillis - swapTimerMillis < SWAP_TIMER_DISPLAY_MS) {
 			HudLayout.draw(drawContext, font, HudLayout.Element.SWAP_TIMER, swapTimerText);
 		}

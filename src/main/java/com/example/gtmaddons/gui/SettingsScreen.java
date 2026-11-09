@@ -3,6 +3,8 @@ package com.example.gtmaddons.gui;
 import com.example.gtmaddons.CobwebTransparency;
 import com.example.gtmaddons.GTMAddOnsClient;
 import com.example.gtmaddons.PvpCategory;
+import com.example.gtmaddons.Settings;
+import com.example.gtmaddons.SwapSession;
 import com.example.gtmaddons.compat.Gfx;
 import com.example.gtmaddons.compat.Mc;
 import com.example.gtmaddons.compat.ModScreen;
@@ -19,19 +21,22 @@ import net.minecraft.network.chat.Component;
  *
  *   hub   Move HUD, then PVP, QOL, Miscellaneous, and PVE (coming soon)
  *   PVP   a row of tabs across the top, one section below at a time:
- *           Wing    cobweb transparency (a slider), boost angle, boost height, swap recording,
- *                   advanced swap info, hide recipes in the recipe book, swap timer (opens SwapTimerScreen)
- *           JP      better combo timers, jetpack sneak animation, hide jetpack particles
- *           General hit sound, combat timer (a HUD line you can move)
- *   QOL   sounds, better near, dropped item names, Black Ops boots glint
- *   MISC  latency tester, GTMAddOns icon, fish cat, then dev mode / QA mode side by
- *         side and admin mode under them (with its Player info... and Notify players... buttons while it is on)
+ *           Wing    cobweb transparency, boost angle, boost height limit (readout, limit view), swap timer, swap information (recording, its inventory
+ *                   button, advanced swap info, auto playback), armor hotkey lock, better recipe book
+ *           JP      better combo timers, better swing, jetpack sneak animation, better jetpack particles
+ *           General hit sound, gun tracers (sizes: all, by category, by gun), combat timer
+ *   QOL   sounds, inventory transparency, better near, dropped item names, dropped item size, Black Ops boots glint
+ *   MISC  latency tester, GTMAddOns icon, fish cat, menu keybind, then dev mode, QA mode and admin mode
+ *
+ * Every setting is one row: its name with an ON/OFF pill (click to switch it) and a ⚙ on the right that opens what can be
+ * adjusted in it (an OptionsScreen of switches and sliders, the swap timer or hit sound menu, the dev / QA filters, the admin
+ * tools). Move HUD is only on the settings hub. A setting with nothing to adjust has a greyed-out ⚙.
  */
 public class SettingsScreen extends ModScreen {
 
 	/** Which page of the settings this screen shows. */
 	public enum Page {
-		HUB("GTMAddOns - Settings"),
+		HUB("GTMAddOns - Mods"),
 		PVP("GTMAddOns - PVP"),
 		QOL("GTMAddOns - QOL"),
 		MISC("GTMAddOns - Miscellaneous");
@@ -142,27 +147,60 @@ public class SettingsScreen extends ModScreen {
 		}
 		y += ROW + GAP / 2;
 
+		Settings settings = mod.settings();
 		switch (pvpTab) {
 			case WING -> {
-				addRenderableWidget(new CobwebSlider(x, y));
-				y += ROW;
-				y = toggle(x, y, "Boost angle", mod::isBoostAngleOn, mod::setBoostAngleOn);
-				y = toggle(x, y, "Boost height", mod::isBoostHeightOn, mod::setBoostHeightOn);
-				y = toggle(x, y, "Swap recording", mod::isSwapRecordButtonOn, mod::setSwapRecordButtonOn);
-				y = toggle(x, y, "Advanced swap info", mod::isSwapDebugOn, mod::setSwapDebugOn);
-				y = toggle(x, y, "Hide recipes in book", mod::isHideRecipeBookOn, mod::setHideRecipeBookOn);
-				addRenderableWidget(ThemedButton.create(Component.literal("Swap timer..."), b -> Mc.setScreen(minecraft, new SwapTimerScreen(this, mod)))
-						.bounds(x, y, BUTTON_WIDTH, 20).build());
+				y = row(x, y, "Cobweb transparency", () -> mod.getCobwebTransparency() > 0, mod::setCobwebTransparencyOn,
+						() -> open(new OptionsScreen(this, "Cobweb transparency").sliderWithOff("Transparency", 0, 100, mod::getCobwebTransparency, mod::setCobwebTransparency)));
+				y = row(x, y, "Boost angle", mod::isBoostAngleOn, mod::setBoostAngleOn, null);
+				y = row(x, y, "Boost height limit", mod::isBoostHeightOn, mod::setBoostHeightOn,
+						() -> open(new OptionsScreen(this, "Boost height limit")
+								.toggle("Height readout", () -> settings.boostHeightReadout, on -> save(() -> settings.boostHeightReadout = on))
+								.toggle("Limit view", () -> settings.boostLimitView, on -> save(() -> settings.boostLimitView = on))
+								.slider("Show after gliding", 0, 10, " s", () -> settings.boostLingerSeconds, v -> save(() -> settings.boostLingerSeconds = v))
+								.note("Limit view: a grid at the boost limit while you glide near it")));
+				y = row(x, y, "Swap timer", () -> SwapTimerScreen.isOn(mod), on -> SwapTimerScreen.setOn(mod, on),
+						() -> Mc.setScreen(minecraft, new SwapTimerScreen(this, mod)));
+				y = row(x, y, "Swap information", () -> settings.swapInfo, on -> save(() -> settings.swapInfo = on),
+						() -> open(new OptionsScreen(this, "Swap information")
+								.action(() -> SwapSession.INSTANCE.isRecording() ? "Stop recording" : "Start recording", this::toggleRecording)
+								.toggle("Recording button in inventory", mod::isSwapRecordButtonOn, mod::setSwapRecordButtonOn)
+								.toggle("Advanced swap info", mod::isSwapDebugOn, mod::setSwapDebugOn)
+								.toggle("Auto playback", () -> settings.swapAutoPlayback, on -> save(() -> settings.swapAutoPlayback = on))
+								.note("Auto playback: your swap info in chat after every recorded fight")));
+				y = row(x, y, "Armor hotkey lock", () -> settings.chestHotkeysOnly, on -> save(() -> settings.chestHotkeysOnly = on), null);
+				row(x, y, "Better recipe book", mod::isHideRecipeBookOn, mod::setHideRecipeBookOn, null);
 			}
 			case JP -> {
-				y = toggle(x, y, "Better combo timers", mod::isComboTimerOn, mod::setComboTimerOn);
-				y = toggle(x, y, "Jetpack sneak animation", mod::isOldSneakingOn, mod::setOldSneakingOn);
-				toggle(x, y, "Hide jetpack particles", mod::isHideJetpackParticlesOn, mod::setHideJetpackParticlesOn);
+				y = row(x, y, "Better combo timers", mod::isComboTimerOn, mod::setComboTimerOn, null);
+				y = row(x, y, "Better swing", mod::isBetterSwingOn, mod::setBetterSwingOn,
+						() -> open(new OptionsScreen(this, "Better swing")
+								.toggle("Always swing", () -> settings.betterSwingRestart, on -> save(() -> settings.betterSwingRestart = on))
+								.slider("Swing speed", 50, 300, () -> settings.betterSwingSpeed, v -> save(() -> settings.betterSwingSpeed = v))
+								.note("Always swing: every click starts a new swing")));
+				y = row(x, y, "Jetpack sneak animation", mod::isOldSneakingOn, mod::setOldSneakingOn, null);
+				row(x, y, "Better jetpack particles", mod::isHideJetpackParticlesOn, mod::setHideJetpackParticlesOn,
+						() -> open(new OptionsScreen(this, "Better jetpack particles")
+								.toggle("Hide", () -> settings.jetpackParticlesHide, on -> save(() -> settings.jetpackParticlesHide = on))
+								.slider("Size", 25, 300, () -> settings.jetpackParticleSize, v -> save(() -> settings.jetpackParticleSize = v))
+								.note("Size is used while Hide is off")));
 			}
 			case GENERAL -> {
-				addRenderableWidget(ThemedButton.create(Component.literal("Hit sound..."), b -> Mc.setScreen(minecraft, new HitSoundScreen(this, mod)))
-						.bounds(x, y, BUTTON_WIDTH, 20).build());
-				toggle(x, y + ROW, "Combat timer", mod::isCombatTimerOn, mod::setCombatTimerOn);
+				y = row(x, y, "Hit sound", () -> mod.settings().hitSound, on -> {
+					mod.settings().hitSound = on;
+					mod.settings().save();
+				}, () -> Mc.setScreen(minecraft, new HitSoundScreen(this, mod)));
+				y = row(x, y, "Gun tracers", () -> settings.gunTracers, on -> save(() -> settings.gunTracers = on),
+						() -> open(new OptionsScreen(this, "Gun tracers")
+								.sliderWithOff("All tracers", 0, 100, () -> settings.tracerSizeAll, v -> save(() -> settings.tracerSizeAll = v))
+								.link("By category", () -> open(new SizeListScreen(currentScreen(), "Tracers by category", com.example.gtmaddons.GunTracers.CATEGORIES,
+										settings.tracerSizeCategory, settings::save)))
+								.link("By gun", () -> open(new SizeListScreen(currentScreen(), "Tracers by gun", new java.util.ArrayList<>(com.example.gtmaddons.GunTracers.GUNS.keySet()),
+										settings.tracerSizeGun, settings::save)))
+								.note("Size = All x category x gun; 0% hides; everyone's shots, both kinds")));
+				row(x, y, "Combat timer", mod::isCombatTimerOn, mod::setCombatTimerOn,
+						() -> open(new OptionsScreen(this, "Combat timer")
+								.toggle("Sound when combat ends", () -> settings.combatTimerSound, on -> save(() -> settings.combatTimerSound = on))));
 			}
 		}
 		return start + ROW + GAP / 2 + PVP_ROWS * ROW;
@@ -172,49 +210,104 @@ public class SettingsScreen extends ModScreen {
 		addRenderableWidget(ThemedButton.create(Component.literal("Sounds..."), b -> Mc.setScreen(minecraft, new GunSoundsScreen(this)))
 				.bounds(x, y, BUTTON_WIDTH, 20).build());
 		y += ROW;
-		addRenderableWidget(new InventorySlider(x, y));
-		y += ROW;
-		y = toggle(x, y, "Better near", mod::isBetterNearOn, mod::setBetterNearOn);
-		y = toggle(x, y, "Dropped item names", mod::isDroppedItemNamesOn, mod::setDroppedItemNamesOn);
-		y = toggle(x, y, "Black Ops boots glint", mod::isBlackOpsGlintOn, mod::setBlackOpsGlintOn);
+		Settings settings = mod.settings();
+		y = row(x, y, "Inventory transparency", () -> mod.getInventoryTransparency() > 0, mod::setInventoryTransparencyOn,
+				() -> open(new OptionsScreen(this, "Inventory transparency").sliderWithOff("Transparency", 0, 100, mod::getInventoryTransparency, mod::setInventoryTransparency)));
+		y = row(x, y, "Better near", mod::isBetterNearOn, mod::setBetterNearOn,
+				() -> open(new OptionsScreen(this, "Better near").toggle("Show job tags", () -> settings.nearJobTags, mod::setNearJobTags)));
+		y = row(x, y, "Dropped item names", mod::isDroppedItemNamesOn, mod::setDroppedItemNamesOn,
+				() -> open(new OptionsScreen(this, "Dropped item names")
+						.toggle("Only listed items", () -> settings.droppedItemFilterOn, on -> save(() -> settings.droppedItemFilterOn = on))
+						.link("Item filter", () -> Mc.setScreen(minecraft, new ItemFilterScreen(currentScreen(), settings, "Item names filter",
+								settings.droppedItemFilter, () -> settings.droppedItemFilterOn, "Only these items are named", "Every item is named (Only listed items is off)")))));
+		y = row(x, y, "Dropped item size", () -> settings.droppedItemSize, on -> save(() -> settings.droppedItemSize = on),
+				() -> open(new OptionsScreen(this, "Dropped item size")
+						.slider("Size", 100, 400, () -> settings.droppedItemSizePercent, v -> save(() -> settings.droppedItemSizePercent = v))
+						.toggle("Only listed items", () -> settings.droppedItemSizeFilterOn, on -> save(() -> settings.droppedItemSizeFilterOn = on))
+						.link("Item filter", () -> Mc.setScreen(minecraft, new ItemFilterScreen(currentScreen(), settings, "Item size filter",
+								settings.droppedItemSizeFilter, () -> settings.droppedItemSizeFilterOn, "Only these items are made bigger", "Every item is made bigger (Only listed items is off)")))));
+		y = row(x, y, "Black Ops boots glint", mod::isBlackOpsGlintOn, mod::setBlackOpsGlintOn,
+				() -> open(new OptionsScreen(this, "Black Ops boots glint")
+						.slider("Glint strength", 0, 100, mod::getGlintStrength, mod::setGlintStrength)
+						.note("The game's Glint Strength: it applies to every glint")));
 		return y;
 	}
 
 	private int buildMisc(int x, int y) {
-		y = toggle(x, y, "Latency tester", mod::isLatencyTesterOn, mod::setLatencyTesterOn);
-		y = toggle(x, y, "GTMAddOns icon", mod::isModIconsOn, mod::setModIconsOn);
-		y = toggle(x, y, "Fish cat", mod::isFishHeadsOn, mod::setFishHeadsOn);
+		y = row(x, y, "Latency tester", mod::isLatencyTesterOn, mod::setLatencyTesterOn, null);
+		y = row(x, y, "GTMAddOns icon", mod::isModIconsOn, mod::setModIconsOn, null);
+		y = row(x, y, "Fish cat", mod::isFishHeadsOn, mod::setFishHeadsOn, null);
+		Settings settings = mod.settings();
+		y = row(x, y, "Extra tracking", () -> settings.extraTracking, on -> save(() -> settings.extraTracking = on), this::openExtraTracking);
+		y = row(x, y, "Menu keybind", () -> settings.menuKeyOn, on -> save(() -> settings.menuKeyOn = on),
+				() -> open(new KeyCaptureScreen(this, settings)));
 
-		// Dev and QA mode sit apart from the other options, side by side, with admin
-		// mode under them. Only one of dev / QA can be on; turning one on switches the
-		// other off.
+		// Dev, QA and admin mode sit apart from the other options. Only one of dev / QA can be on; turning one on switches the other
+		// off. Their ⚙ opens what they show (dev / QA) or their tools (admin).
 		y += GAP;
-		int half = (BUTTON_WIDTH - 4) / 2;
-		addRenderableWidget(ThemedButton.create(onOff("Dev mode", mod.isDevModeOn()), b -> openModeMenu(false))
-				.bounds(x, y, half, 20).build());
-		addRenderableWidget(ThemedButton.create(onOff("QA mode", mod.isQaModeOn()), b -> openModeMenu(true))
-				.bounds(x + BUTTON_WIDTH - half, y, half, 20).build());
-		y += ROW;
-		addRenderableWidget(ThemedButton.create(onOff("Admin mode", mod.isAdminModeOn()), b -> toggleAdminMode())
-				.bounds(x, y, BUTTON_WIDTH, 20).build());
-		if (mod.isAdminModeOn()) {
-			// Admin mode's own tools sit under its switch.
-			y += ROW;
-			addRenderableWidget(ThemedButton.create(Component.literal("Player info..."), b -> Mc.setScreen(minecraft, new AdminPlayerInfoScreen(this, mod)))
-					.bounds(x, y, BUTTON_WIDTH, 20).build());
-			y += ROW;
-			addRenderableWidget(ThemedButton.create(Component.literal("Notify players..."), b -> Mc.setScreen(minecraft, new AdminNoticeScreen(this, mod)))
-					.bounds(x, y, BUTTON_WIDTH, 20).build());
-		}
-		return y + ROW - GAP;
+		y = row(x, y, "Dev mode", mod::isDevModeOn, on -> setMode(false, on), () -> openModeMenu(false));
+		y = row(x, y, "QA mode", mod::isQaModeOn, on -> setMode(true, on), () -> openModeMenu(true));
+		Runnable adminTools = mod.isAdminModeOn() ? () -> Mc.setScreen(minecraft, new AdminToolsScreen(this, mod)) : null;
+		y = row(x, y, "Admin mode", mod::isAdminModeOn, on -> toggleAdminMode(), adminTools);
+		return y - GAP;
 	}
 
-	/** One ON/OFF button that flips a setting and relabels itself. Returns the next row's y. */
-	private int toggle(int x, int y, String label, java.util.function.BooleanSupplier get, java.util.function.Consumer<Boolean> set) {
+	/** What the remote config's tracking rules measure right now (Probes), one note each. */
+	private void openExtraTracking() {
+		OptionsScreen page = new OptionsScreen(this, "Extra tracking")
+				.note("Tracking rules sent by the GTMAddOns server: numbers per fight, uploaded with it")
+				.note("and shown in Raw info. Turn this off to run none of them.");
+		var rules = com.example.gtmaddons.probe.Probes.activeRules();
+		if (rules.isEmpty()) page.note("No rules right now.");
+		for (var rule : rules) page.note(rule.id + (rule.about.isEmpty() ? "" : ": " + rule.about));
+		open(page);
+	}
+
+	private static final int GEAR = 20;
+
+	private void open(Screen screen) {
+		Mc.setScreen(minecraft, screen);
+	}
+
+	private Screen currentScreen() {
+		return Mc.screen(minecraft);
+	}
+
+	/**
+	 * Swap information's Start / Stop recording (the same as /gao swapinfo start / end). Stopping prints the averages in chat, so the
+	 * menu closes to show them.
+	 */
+	private void toggleRecording() {
+		if (SwapSession.INSTANCE.isRecording()) {
+			SwapSession.INSTANCE.end();
+			Mc.setScreen(minecraft, null);
+		} else {
+			SwapSession.INSTANCE.sendStarted(SwapSession.INSTANCE.start());
+		}
+	}
+
+	/** Changes a setting and saves it. */
+	private void save(Runnable change) {
+		change.run();
+		mod.settings().save();
+	}
+
+	/**
+	 * One setting: its name with an ON/OFF pill (click it to switch the setting), and a ⚙ on the far right that opens what can be
+	 * adjusted in it. With nothing to adjust the ⚙ is greyed out. Returns the next row's y.
+	 */
+	private int row(int x, int y, String label, java.util.function.BooleanSupplier get, java.util.function.Consumer<Boolean> set, Runnable gear) {
 		addRenderableWidget(ThemedButton.create(onOff(label, get.getAsBoolean()), b -> {
 			set.accept(!get.getAsBoolean());
 			b.setMessage(onOff(label, get.getAsBoolean()));
-		}).bounds(x, y, BUTTON_WIDTH, 20).build());
+		}).bounds(x, y, BUTTON_WIDTH - GEAR - 4, 20).build());
+		Button settings = ThemedButton.create(Component.literal("⚙"), b -> {
+			if (gear != null) gear.run();
+		}).bounds(x + BUTTON_WIDTH - GEAR, y, GEAR, 20)
+				.tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(gear != null ? label + " settings" : "Nothing to adjust in " + label)))
+				.build();
+		settings.active = gear != null;
+		addRenderableWidget(settings);
 		return y + ROW;
 	}
 
@@ -223,8 +316,8 @@ public class SettingsScreen extends ModScreen {
 		int rows = switch (page) {
 			case HUB -> ROW + GAP + 4 * ROW;
 			case PVP -> ROW + GAP / 2 + PVP_ROWS * ROW;
-			case QOL -> 4 * ROW;
-			case MISC -> 3 * ROW + GAP + 2 * ROW - GAP + (mod.isAdminModeOn() ? 2 * ROW : 0);
+			case QOL -> 6 * ROW;
+			case MISC -> 4 * ROW + GAP + 3 * ROW - GAP;
 		};
 		return rows + GAP + 20;
 	}
@@ -254,6 +347,25 @@ public class SettingsScreen extends ModScreen {
 	}
 
 	/**
+	 * Dev or QA mode's switch. Off is immediate; on is checked with the backend first (the account must be allowed), and switches
+	 * the other mode off.
+	 */
+	private void setMode(boolean qa, boolean on) {
+		if (!on) {
+			if (qa) mod.disableQaMode(message -> status = message);
+			else mod.disableDevMode(message -> status = message);
+			rebuildWidgets();
+			return;
+		}
+		mod.checkDevAccess(message -> status = message, () -> {
+			if (qa) mod.enableQaMode(message -> status = message);
+			else mod.enableDevMode(message -> status = message);
+			Mc.setScreen(minecraft, this);
+			rebuildWidgets();
+		});
+	}
+
+	/**
 	 * Opens the dev mode (or QA mode) menu, where each thing to show is switched
 	 * on or off and the mode itself is turned on or off. If the mode is already
 	 * on, access was already approved; otherwise it's checked with the backend
@@ -274,43 +386,6 @@ public class SettingsScreen extends ModScreen {
 		// The cobweb texture is only read when resources load, so a changed slider reloads them once.
 		if (page == Page.PVP) CobwebTransparency.reloadIfChanged();
 		Mc.setScreen(minecraft, parent);
-	}
-
-	/** 0-100% of the cobweb made see-through, saved as it's dragged; applied when you leave this page. */
-	private final class CobwebSlider extends ThemedSlider {
-		CobwebSlider(int x, int y) {
-			super(x, y, BUTTON_WIDTH, 20, Component.empty(), mod.getCobwebTransparency() / 100.0);
-			updateMessage();
-		}
-
-		@Override
-		protected void updateMessage() {
-			int percent = (int) Math.round(value * 100);
-			setMessage(Component.literal(percent == 0 ? "Cobweb transparency: Off" : "Cobweb transparency: " + percent + "%"));
-		}
-
-		@Override
-		protected void applyValue() {
-			mod.setCobwebTransparency((int) Math.round(value * 100));
-		}
-	}
-
-	private final class InventorySlider extends ThemedSlider {
-		InventorySlider(int x, int y) {
-			super(x, y, BUTTON_WIDTH, 20, Component.empty(), mod.getInventoryTransparency() / 100.0);
-			updateMessage();
-		}
-
-		@Override
-		protected void updateMessage() {
-			int percent = (int) Math.round(value * 100);
-			setMessage(Component.literal(percent == 0 ? "Inventory transparency: Off" : "Inventory transparency: " + percent + "%"));
-		}
-
-		@Override
-		protected void applyValue() {
-			mod.setInventoryTransparency((int) Math.round(value * 100));
-		}
 	}
 
 	private static Component onOff(String label, boolean on) {

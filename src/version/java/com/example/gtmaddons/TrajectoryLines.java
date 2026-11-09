@@ -87,6 +87,7 @@ public final class TrajectoryLines {
 
 		Minecraft client = Minecraft.getInstance();
 		Vec3 camera = client.gameRenderer.getMainCamera().position();
+		if (context.matrices() == null || context.consumers() == null) return;
 		PoseStack.Pose entry = context.matrices().last();
 		VertexConsumer buffer = context.consumers().getBuffer(RenderTypes.linesTranslucent());
 

@@ -76,6 +76,9 @@ final class SwingDebugger {
 		String itemChange = null;
 		/** Whether an attack packet went to the server (only for clicks on an entity). */
 		boolean attackSent = false;
+		/** The player the click was aimed at (entity id, -1 = none), and the first GTM action-bar line after the click. */
+		int targetId = -1;
+		String gtmMessage = null;
 		/** The server's attack sounds at your feet after this click, e.g. "knockback strong". */
 		final Set<String> serverSounds = new LinkedHashSet<>();
 
@@ -172,6 +175,7 @@ final class SwingDebugger {
 		logWeapon(client, player, stack);
 		Click click = new Click(now, problem, details);
 		click.attackSent = onEntity && !dropped && inItemRange && !player.isHandsBusy();
+		if (client.hitResult instanceof EntityHitResult aimed && aimed.getEntity() instanceof Player) click.targetId = aimed.getEntity().getId();
 		pending.add(click);
 		// Open the log now, so the server's attack sounds a moment later are recorded.
 		log.openWindow(client);
@@ -207,6 +211,48 @@ final class SwingDebugger {
 				return;
 			}
 		}
+	}
+
+	/** The last damage each entity took (by entity id): when, and who caused it. */
+	private record Hurt(long nanos, int causeId) {}
+	private final java.util.Map<Integer, Hurt> lastHurt = new java.util.HashMap<>();
+	/** A GTM action-bar line this soon after a click belongs to it. */
+	private static final long MESSAGE_MATCH_NANOS = 350_000_000L;
+
+	/** Any damage event the client is told about (DevLogger), so a click can say when its target was last hurt. */
+	void onAnyDamage(int entityId, int causeId) {
+		if (lastHurt.size() > 256) lastHurt.clear();
+		lastHurt.put(entityId, new Hurt(System.nanoTime(), causeId));
+	}
+
+	/** GTM's action-bar lines: the first one after a click on a player is kept with it ("Target recovering", "Combo'd"...). */
+	void onActionBar(String text) {
+		long now = System.nanoTime();
+		for (Click click : pending) {
+			if (click.targetId >= 0 && click.gtmMessage == null && now - click.nanos <= MESSAGE_MATCH_NANOS) click.gtmMessage = text;
+		}
+	}
+
+	/**
+	 * For a click on a player that dealt no damage: who last hurt that player and how long before the click, how long since you were
+	 * last hurt, and GTM's message right after - the things that decide whether the server lets an attack through.
+	 */
+	private String context(Minecraft client, Click click) {
+		if (click.targetId < 0 || client.level == null || client.player == null) return "";
+		List<String> parts = new ArrayList<>();
+		Hurt target = lastHurt.get(click.targetId);
+		if (target != null && target.nanos() < click.nanos) {
+			int me = client.player.getId();
+			Entity cause = client.level.getEntity(target.causeId());
+			String by = target.causeId() == me ? "you" : cause != null ? cause.getName().getString() : target.causeId() < 0 ? "no one (fall, fire...)" : "someone out of view";
+			parts.add(String.format("target last hurt %dms before by %s", (click.nanos - target.nanos()) / 1_000_000L, by));
+		} else {
+			parts.add("target not hurt recently");
+		}
+		Hurt mine = lastHurt.get(client.player.getId());
+		if (mine != null && mine.nanos() < click.nanos) parts.add(String.format("you were last hurt %dms before", (click.nanos - mine.nanos()) / 1_000_000L));
+		parts.add(click.gtmMessage != null ? "GTM said \"" + click.gtmMessage + "\"" : "no GTM message");
+		return " | " + String.join(", ", parts);
 	}
 
 	/** A registered hit by you. */
@@ -267,7 +313,8 @@ final class SwingDebugger {
 				: "no hit registered";
 		String line = (noFreshSwing ? "Click with no fresh swing | " : "Click with fresh swing | ") + hitText
 				+ (click.attackSent ? " | " + click.serverResponse() : "")
-				+ (why.isEmpty() ? "" : " | " + String.join(" + ", why)) + " | " + click.details;
+				+ (why.isEmpty() ? "" : " | " + String.join(" + ", why)) + " | " + click.details
+				+ (!click.serverResponse().startsWith("server DEALT") ? context(client, click) : "");
 		log.openWindow(client);
 		log.add("SWING  " + line);
 		if (hit && noFreshSwing) DevLogger.chat(line, ChatFormatting.GOLD);

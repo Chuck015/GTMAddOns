@@ -28,6 +28,13 @@ public final class SessionStats {
 		last = fight;
 	}
 
+	/** Starts this session's numbers over (the main screen's Reset session). */
+	public synchronized void reset() {
+		kills = deaths = swaps = 0;
+		swapMsSum = 0;
+		last = null;
+	}
+
 	public synchronized int kills() { return kills; }
 	public synchronized int deaths() { return deaths; }
 	/** The average successful Wing / Air swap this session in ms, or -1 with none. */

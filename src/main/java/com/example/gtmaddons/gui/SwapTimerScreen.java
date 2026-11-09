@@ -49,7 +49,26 @@ public class SwapTimerScreen extends ModScreen {
 	}
 
 	private boolean enabled() {
+		return isOn(mod);
+	}
+
+	/** Whether any swap display is on (the settings row's switch). */
+	static boolean isOn(GTMAddOnsClient mod) {
 		return mod.isSwapTimerShown() || mod.isCornerSwapTextOn();
+	}
+
+	/** The settings row's switch: off turns both displays off, on brings back the last choice. */
+	static void setOn(GTMAddOnsClient mod, boolean on) {
+		if (!on) {
+			for (Mode mode : Mode.values()) {
+				if (mode.timer == mod.isSwapTimerShown() && mode.corner == mod.isCornerSwapTextOn()) remembered = mode;
+			}
+			mod.setSwapTimerShown(false);
+			mod.setCornerSwapTextOn(false);
+		} else {
+			mod.setSwapTimerShown(remembered.timer);
+			mod.setCornerSwapTextOn(remembered.corner);
+		}
 	}
 
 	private void apply(Mode mode) {

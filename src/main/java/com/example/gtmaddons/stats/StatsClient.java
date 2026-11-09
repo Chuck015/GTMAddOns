@@ -368,6 +368,7 @@ public final class StatsClient {
 		if (fight.netEnded()) body.addProperty("net_ended", true);
 		if (fight.movementInput() != null) body.add("movement_input", fight.movementInput().toJson());
 		if (fight.mouseInput() != null) body.add("mouse_input", fight.mouseInput().toJson());
+		if (fight.mouseInput() != null && fight.mouseInput().probes != null) body.add("probes", fight.mouseInput().probes);
 		body.add("swaps", GSON.toJsonTree(fight.swaps()));
 		body.add("guns", GSON.toJsonTree(List.copyOf(guns.values())));
 		body.add("combos", GSON.toJsonTree(List.copyOf(combos.values())));

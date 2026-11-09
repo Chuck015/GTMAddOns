@@ -22,6 +22,8 @@ public final class MovementInputTracker {
 	public static final class Stats {
 		public double ms, w, a, s, d, still, ground, sprint, sneak;
 		public int strafeSwitches, fbSwitches, jumps;
+		/** How you were moving at each shot and each hit you took over the same fight (MoveStates); only on a fight's numbers. */
+		public MoveStates.Stats states;
 		public double distance, maxBps;
 		private int lastLat = 0, lastFb = 0;
 
@@ -71,6 +73,7 @@ public final class MovementInputTracker {
 			o.addProperty("jumps", jumps);
 			o.addProperty("distance", r(distance));
 			o.addProperty("max_bps", r(maxBps));
+			if (states != null) states.addTo(o);
 			return o;
 		}
 
@@ -95,17 +98,21 @@ public final class MovementInputTracker {
 
 	public void onFightStart() {
 		fight = new Stats();
+		if (com.example.gtmaddons.probe.Remote.on("move_states", true)) MoveStates.INSTANCE.onFightStart();
 	}
 
 	/** The fight ended: its numbers (null if none were being collected). */
 	public Stats onFightEnd() {
 		Stats done = fight;
 		fight = null;
+		MoveStates.Stats states = MoveStates.INSTANCE.onFightEnd();
+		if (done != null) done.states = states;
 		return done;
 	}
 
 	public void onFightDrop() {
 		fight = null;
+		MoveStates.INSTANCE.onFightDrop();
 	}
 
 	// ---- The window after a swap ----

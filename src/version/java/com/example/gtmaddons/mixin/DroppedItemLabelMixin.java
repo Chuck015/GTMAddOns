@@ -1,6 +1,7 @@
 package com.example.gtmaddons.mixin;
 
 import com.example.gtmaddons.DroppedItemLabels;
+import com.example.gtmaddons.DroppedItemSizes;
 import com.example.gtmaddons.DroppedLabelState;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
@@ -29,17 +30,30 @@ public abstract class DroppedItemLabelMixin {
 			at = @At("TAIL"), require = 0)
 	private void gtmaddons$label(ItemEntity item, ItemEntityRenderState state, float tickProgress, CallbackInfo ci) {
 		((DroppedLabelState) (Object) state).gtmaddons$setLabel(DroppedItemLabels.labelFor(item));
+		((DroppedLabelState) (Object) state).gtmaddons$setSize(DroppedItemSizes.sizeFor(item));
+	}
+
+	/** Dropped item size: the item is drawn scaled around where it lies (DroppedItemSizes); undone in gtmaddons$draw. */
+	@Inject(method = "submit(Lnet/minecraft/client/renderer/entity/state/ItemEntityRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;Lnet/minecraft/client/renderer/state/CameraRenderState;)V",
+			at = @At("HEAD"), require = 0)
+	private void gtmaddons$grow(ItemEntityRenderState state, PoseStack matrices, SubmitNodeCollector queue, CameraRenderState camera, CallbackInfo ci) {
+		float size = ((DroppedLabelState) (Object) state).gtmaddons$getSize();
+		if (size == 1f) return;
+		matrices.pushPose();
+		matrices.scale(size, size, size);
 	}
 
 	@Inject(method = "submit(Lnet/minecraft/client/renderer/entity/state/ItemEntityRenderState;Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;Lnet/minecraft/client/renderer/state/CameraRenderState;)V",
-			at = @At("TAIL"), require = 0)
+			at = @At("RETURN"), require = 0)
 	private void gtmaddons$draw(ItemEntityRenderState state, PoseStack matrices, SubmitNodeCollector queue, CameraRenderState camera, CallbackInfo ci) {
+		float size = ((DroppedLabelState) (Object) state).gtmaddons$getSize();
+		if (size != 1f) matrices.popPose();
 		Component label = ((DroppedLabelState) (Object) state).gtmaddons$getLabel();
 		if (label == null) return;
 		Font font = Minecraft.getInstance().font;
 		FormattedCharSequence text = label.getVisualOrderText();
 		matrices.pushPose();
-		matrices.translate(0.0, state.boundingBoxHeight + 0.5, 0.0);
+		matrices.translate(0.0, state.boundingBoxHeight * size + 0.5, 0.0);
 		matrices.mulPose(camera.orientation);
 		matrices.scale(0.025f, -0.025f, 0.025f);
 		queue.submitText(matrices, -font.width(text) / 2.0f, 0.0f, text, false, Font.DisplayMode.NORMAL,

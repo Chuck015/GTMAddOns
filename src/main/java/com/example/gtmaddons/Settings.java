@@ -39,16 +39,43 @@ public final class Settings {
 	public boolean latencyTester = false;
 	/** Live Combo'd and hit-again timers in place of GTM's frozen messages (see ComboTracker). */
 	public boolean comboTimer = false;
+	/** JP: Better swing - every swing of yours restarts the animation, at betterSwingSpeed % of its normal speed (BetterSwing; visual only). */
+	public boolean betterSwing = false;
+	public int betterSwingSpeed = 100;
+	/** Better swing's "Always swing": restart the swing on every click (the speed applies either way). */
+	public boolean betterSwingRestart = true;
 	/** Look angle under the crosshair while gliding, green when a boost would work (see BoostAngleHud). */
 	public boolean boostAngle = false;
 	/** Height under the crosshair while gliding, green when low enough to boost (see BoostHeightHud). */
 	public boolean boostHeight = false;
+	/** Boost height limit: the height line under the crosshair (its original function) and the grid at the limit (BoostLimitView). */
+	public boolean boostHeightReadout = true;
+	public boolean boostLimitView = false;
+	/** How many seconds the readout and the limit view stay up after you stop gliding (0 = they go at once). */
+	public int boostLingerSeconds = 3;
+	/** Misc > Menu keybind: a key that opens the GTMAddOns menu (MenuKey; a GLFW key code, -1 = none). */
+	public boolean menuKeyOn = false;
+	public int menuKey = -1;
 	/** /near's reply as a sorted list, one player per line, in place of GTM's one long line (see NearList). */
 	public boolean betterNear = false;
+	/** Better near: keep a player's job tag (cop, hitman) in front of their name. */
+	public boolean nearJobTags = true;
 	/** Hide the recipes inside the recipe book of the survival inventory; the book itself still opens and closes (RecipeBookHider). */
 	public boolean hideRecipeBook = false;
+	/** Wing: Armor hotkey lock - hotbar / offhand swap keys do nothing over the helmet, leggings and boots slots of your inventory (ChestHotkeys). */
+	public boolean chestHotkeysOnly = false;
+	/** Misc: Extra tracking - run the tracking rules from the remote config (Probes) and upload their numbers with each fight. */
+	public boolean extraTracking = true;
 	/** Names above items lying on the ground, only for items in plain view (DroppedItemLabels). */
 	public boolean droppedItemNames = false;
+	/** Dropped item names: only name items whose name contains one of droppedItemFilter (ignoring case); off = every item. */
+	public boolean droppedItemFilterOn = false;
+	public java.util.List<String> droppedItemFilter = new java.util.ArrayList<>();
+	/** Dropped item size (DroppedItemSizes): draw items on the ground at droppedItemSizePercent; only the listed ones while the filter is on. */
+	public boolean droppedItemSize = false;
+	public int droppedItemSizePercent = 200;
+	public boolean droppedItemSizeFilterOn = true;
+	public java.util.List<String> droppedItemSizeFilter = new java.util.ArrayList<>();
 	/** The enchantment glint on the item named Black Ops Boots (BlackOpsGlint). */
 	public boolean blackOpsGlint = false;
 	/** An icon after the name of players who run GTMAddOns (tab list and nametags). */
@@ -56,20 +83,42 @@ public final class Settings {
 
 	/** A Start / Stop recording button beside the inventory for the swap recording (SwapSession). */
 	public boolean swapRecordButton = false;
+	/** Swap information (Settings > Wing): the switch over the recording button, advanced swap info and auto playback. */
+	public boolean swapInfo = false;
+	/** Set once swapInfo has been switched on for players who already used one of its parts. */
+	public boolean swapInfoMigrated = false;
+	/** Swap recording's auto playback: the swap averages of every recorded fight in chat when it ends (SwapSession.sendFight). */
+	public boolean swapAutoPlayback = false;
 
-	/** Hide the flame and cloud particles of flying jetpacks (JetpackParticles). */
+	/**
+	 * Better jetpack particles (JetpackParticles): the flame and cloud particles of flying jetpacks are hidden (jetpackParticlesHide)
+	 * or drawn at jetpackParticleSize %. The field keeps its old name so the old "Hide jetpack particles" switch carries over.
+	 */
 	public boolean hideJetpackParticles = false;
+	public boolean jetpackParticlesHide = true;
+	public int jetpackParticleSize = 100;
+
+	/** Gun tracers (GunTracers): the size of everyone's gun tracers, All x category x gun, each 0-100% (0 hides them). */
+	public boolean gunTracers = false;
+	public int tracerSizeAll = 100;
+	public Map<String, Integer> tracerSizeCategory = new HashMap<>();
+	public Map<String, Integer> tracerSizeGun = new HashMap<>();
 
 	/** 0-100: how much of the cobweb texture is made see-through (CobwebTransparency). */
 	public int cobwebTransparency = 0;
 	/** QOL: how see-through the survival inventory's panel is, 0-100% (100 = fully clear; see InventoryTransparency). */
 	public int inventoryTransparency = 0;
+	/** The percentages the two transparency settings go back to when switched on again (their sliders set them). */
+	public int cobwebTransparencyLast = 50;
+	public int inventoryTransparencyLast = 50;
 
 	/** Crouch while flying and sneaking, like 1.8 (OldSneaking). */
 	public boolean oldSneaking = false;
 
 	/** A HUD line with the seconds left of the combat tag (CombatTracker.timerText). */
 	public boolean combatTimer = false;
+	/** Combat timer: a sound when the combat tag ends (CombatTracker). */
+	public boolean combatTimerSound = false;
 
 	/** Draw every player's head as a fish cat (FishHeads). */
 	public boolean fishHeads = false;
@@ -125,6 +174,10 @@ public final class Settings {
 					if (settings.hudPositions == null) settings.hudPositions = new HashMap<>();
 					if (settings.devFiltersOff == null) settings.devFiltersOff = new HashSet<>();
 					if (settings.qaFiltersOff == null) settings.qaFiltersOff = new HashSet<>();
+					if (settings.tracerSizeCategory == null) settings.tracerSizeCategory = new HashMap<>();
+					if (settings.tracerSizeGun == null) settings.tracerSizeGun = new HashMap<>();
+					if (settings.droppedItemFilter == null) settings.droppedItemFilter = new java.util.ArrayList<>();
+					if (settings.droppedItemSizeFilter == null) settings.droppedItemSizeFilter = new java.util.ArrayList<>();
 					return settings;
 				}
 			}

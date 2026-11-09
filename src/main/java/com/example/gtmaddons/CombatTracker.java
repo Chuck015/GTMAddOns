@@ -89,9 +89,18 @@ public final class CombatTracker {
 		}
 	}
 
+	/** Runs when the tag ends on its own terms (not death or leaving): the combat timer's sound (set by GTMAddOnsClient). */
+	private Runnable onTagEnded = () -> { };
+
+	public void setOnTagEnded(Runnable action) {
+		onTagEnded = action;
+	}
+
 	private void end(String reason) {
 		if (!tagged) return;
 		tagged = false;
+		boolean survived = !reason.contains("died") && !reason.contains("death") && !reason.contains("left the world") && !reason.contains("arrested");
+		if (survived) onTagEnded.run();
 		if (DevLogger.INSTANCE.wants(DevFilter.FIGHTS)) DevLogger.chat("Combat tag cleared: " + reason, ChatFormatting.GREEN);
 	}
 

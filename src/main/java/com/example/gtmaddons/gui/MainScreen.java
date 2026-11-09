@@ -4,7 +4,6 @@ import com.example.gtmaddons.CreditsAudio;
 import com.example.gtmaddons.FightTracker;
 import com.example.gtmaddons.GTMAddOnsClient;
 import com.example.gtmaddons.SessionStats;
-import com.example.gtmaddons.SwapSession;
 import com.example.gtmaddons.compat.Gfx;
 import com.example.gtmaddons.compat.Mc;
 import com.example.gtmaddons.compat.ModScreen;
@@ -20,10 +19,10 @@ import net.minecraft.network.chat.Component;
  *
  *   [ GTMAddOns               v1.5.1 - MC 1.21.11 ]   header card: version, dev / QA / admin tags
  *   [ Player Stats        ] [ Personal Stats      ]   tiles (both stats tiles are locked while you're combat-tagged)
- *   [ Settings            ] [ Swap recording      ]   swap recording = /gao swapinfo start / end
+ *   [ Mods                                          ]   the settings
  *   [ THIS SESSION: kills, deaths, average swap, last fight ]   from memory only (SessionStats), no backend reads
  *   [ Update to x.y.z ]   only when there is one
- *   [ Done ]                                    [Credits]
+ *   [ Reset session ] [ Done ]                    [Credits]   reset session = start This session's numbers over
  */
 public class MainScreen extends ModScreen {
 
@@ -62,17 +61,17 @@ public class MainScreen extends ModScreen {
 		personalStats = addRenderableWidget(ThemedButton.create(Component.literal("Personal Stats"),
 				b -> mod.openPersonalStats(this, message -> status = message))
 				.subtitle("Your fights, swaps, ratings").bounds(rightX, tilesY, tileW, TILE_H).build());
-		addRenderableWidget(ThemedButton.create(Component.literal("Settings"), b -> Mc.setScreen(minecraft, new SettingsScreen(this, mod)))
-				.subtitle("HUD, PvP, sounds and more").bounds(left, tilesY + TILE_H + GAP, tileW, TILE_H).build());
-		addRenderableWidget(ThemedButton.create(Component.literal("Swap recording"), b -> toggleSwapRecording())
-				.subtitle(SwapSession.INSTANCE.isRecording() ? "Recording - stop and show" : "Average your next swaps")
-				.bounds(rightX, tilesY + TILE_H + GAP, tileW, TILE_H).build());
+		addRenderableWidget(ThemedButton.create(Component.literal("Mods"), b -> Mc.setScreen(minecraft, new SettingsScreen(this, mod)))
+				.subtitle("PvP, QOL, sounds and more").bounds(left, tilesY + TILE_H + GAP, panelW, TILE_H).build());
 
 		int updateY = tilesY + TILE_H * 2 + GAP + GAP + SESSION_H + GAP;
 		update = addRenderableWidget(ThemedButton.create(Component.literal("Update"), b -> Updater.INSTANCE.requestUpdate())
 				.accent(Ui.ORANGE).bounds(left, updateY, panelW, 20).build());
+		addRenderableWidget(ThemedButton.create(Component.literal("Reset session"), b -> SessionStats.INSTANCE.reset())
+				.tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal("Start This session's kills, deaths, swaps and last fight over")))
+				.bounds(width / 2 - 102, updateY + 20 + GAP, 100, 20).build());
 		addRenderableWidget(ThemedButton.create(CommonComponents.GUI_DONE, b -> onClose())
-				.bounds(width / 2 - 50, updateY + 20 + GAP, 100, 20).build());
+				.bounds(width / 2 + 2, updateY + 20 + GAP, 100, 20).build());
 		// Bottom-right corner: plays the credits audio, press again to stop (CreditsAudio).
 		credits = addRenderableWidget(ThemedButton.create(Component.literal(creditsLabel()), b -> {
 			CreditsAudio.INSTANCE.toggle(Mc.masterVolume(minecraft));
@@ -80,17 +79,6 @@ public class MainScreen extends ModScreen {
 		}).bounds(width - 66, height - 26, 60, 20).build());
 		updateCombatLock();
 		updateUpdateButton();
-	}
-
-	/** The swap recording tile: /gao swapinfo start, or end (which prints the averages in chat, so the menu closes to show them). */
-	private void toggleSwapRecording() {
-		if (SwapSession.INSTANCE.isRecording()) {
-			SwapSession.INSTANCE.end();
-			onClose();
-		} else {
-			SwapSession.INSTANCE.sendStarted(SwapSession.INSTANCE.start());
-			rebuildWidgets();
-		}
 	}
 
 	@Override

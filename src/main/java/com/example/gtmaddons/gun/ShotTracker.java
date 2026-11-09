@@ -205,8 +205,11 @@ public final class ShotTracker {
 				// Response time only means something for the first shot of a trigger pull.
 				Long response = triggerPulledNanos >= 0 ? now - triggerPulledNanos : null;
 				triggerPulledNanos = -1L;
-				shots.add(new Shot(now, gun, lastAmmo, ammo, response, PvpCategory.classify(player),
-						isMovementGun(gun) ? lastFrameBps : null));
+				Shot fired = new Shot(now, gun, lastAmmo, ammo, response, PvpCategory.classify(player),
+						isMovementGun(gun) ? lastFrameBps : null);
+				shots.add(fired);
+				com.example.gtmaddons.MoveStates.INSTANCE.onShotFired(fired.wallMillis);
+				if (com.example.gtmaddons.probe.Probes.wants("shot")) com.example.gtmaddons.probe.Probes.emit("shot", "gun", gun, "cat", PvpCategory.classify(player).name(), "move", com.example.gtmaddons.MoveStates.stateName(Minecraft.getInstance()));
 			}
 			lastGun = gun;
 			lastAmmo = ammo;

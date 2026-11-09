@@ -301,6 +301,7 @@ public final class FightTracker {
 
 	private void end(String outcome, String opponent) {
 		beforeFightEnds.run();
+		com.example.gtmaddons.probe.ProbeWatch.onFightEdge("fight_end", "outcome", outcome);
 		closing.add(new Closing(current, outcome, opponent, System.currentTimeMillis(), System.nanoTime(), GearTracker.INSTANCE.onFightEnd(opponent), MovementInputTracker.INSTANCE.onFightEnd(), MouseTracker.INSTANCE.onFightEnd()));
 		current = null;
 	}
@@ -320,6 +321,7 @@ public final class FightTracker {
 					ChatFormatting.GREEN);
 		}
 		if (c.movement != null) DevLogger.INSTANCE.fightMovement(c.movement.describe(), c.movement.toJson().toString());
+		if (c.mouse != null && c.mouse.probes != null) DevLogger.INSTANCE.fightProbes(c.mouse.probes.toString());
 		if (c.gear != null) DevLogger.INSTANCE.fightGear(opponent, c.gear.describe(), c.gear.json(), c.gear.trackJson());
 		for (Consumer<Fight> listener : listeners) listener.accept(done);
 	}

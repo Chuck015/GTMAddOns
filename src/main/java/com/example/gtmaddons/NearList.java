@@ -43,6 +43,9 @@ public final class NearList {
 	private static final long ASKED_WINDOW_NANOS = 15_000_000_000L;
 	private static volatile long lastCommandNanos = System.nanoTime() - 2 * ASKED_WINDOW_NANOS;
 
+	/** Better near's "Show job tags" option (Settings.nearJobTags), set by GTMAddOnsClient. */
+	public static volatile boolean showJobTags = true;
+
 	private NearList() {}
 
 	/** Any command the player sends: a /near reply that follows is one they asked for. */
@@ -143,7 +146,7 @@ public final class NearList {
 			if (at < 0) continue;
 			from = at + words[i].length();
 			String letters = words[i].replaceAll("[^A-Za-z]", "").toLowerCase(java.util.Locale.ROOT);
-			if (JOB_TAGS.contains(letters)) out.append(Component.literal(words[i] + " ").setStyle(styleAt(runs, p.start() + at).withBold(false)));
+			if (showJobTags && JOB_TAGS.contains(letters)) out.append(Component.literal(words[i] + " ").setStyle(styleAt(runs, p.start() + at).withBold(false)));
 		}
 		out.append(nameText);
 		return out;

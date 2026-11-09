@@ -55,8 +55,12 @@ public abstract class ClientPlayNetworkHandlerMixin {
 		if (!gtmaddons$onGameThread()) return;
 		Minecraft client = Minecraft.getInstance();
 		CombatTracker.INSTANCE.onDamage(packet.entityId(), packet.sourceCauseId());
+		com.example.gtmaddons.MoveStates.INSTANCE.onDamage(packet.entityId(), packet.sourceCauseId());
 		if (client.player != null && packet.entityId() == client.player.getId()) com.example.gtmaddons.GunSounds.INSTANCE.onOwnDamage();
-		ComboTracker.INSTANCE.onDamage(packet.entityId(), packet.sourceCauseId());
+		ComboTracker.INSTANCE.onDamage(packet.entityId(), packet.sourceCauseId(), packet.sourceDirectId(),
+				packet.sourceType().unwrapKey().map(key -> key.identifier().toString()).orElse("?"));
+		com.example.gtmaddons.probe.Probes.onDamage(packet.entityId(), packet.sourceCauseId(), packet.sourceDirectId(),
+				packet.sourceType().unwrapKey().map(key -> key.identifier().toString()).orElse("?"));
 		NetFightEnd.INSTANCE.onDamage(client.level != null ? client.level.getEntity(packet.entityId()) : null, packet.sourceCauseId());
 		HitSounds.INSTANCE.onDamage(client.level != null ? client.level.getEntity(packet.entityId()) : null, packet.sourceCauseId());
 		ShotTracker.INSTANCE.onDamage(client.level != null ? client.level.getEntity(packet.entityId()) : null,
@@ -86,6 +90,8 @@ public abstract class ClientPlayNetworkHandlerMixin {
 			double distance = client.player.getEyePosition().distanceTo(position);
 			ShotTracker.INSTANCE.onSound(id, distance);
 			LatencyTester.INSTANCE.onSound(id, distance);
+			com.example.gtmaddons.probe.ProbeWatch.onSound(id, distance);
+			if (com.example.gtmaddons.probe.Probes.wants("sound")) com.example.gtmaddons.probe.Probes.emit("sound", "id", id, "dist", com.example.gtmaddons.probe.Probes.round(distance), "volume", (double) packet.getVolume(), "pitch", (double) packet.getPitch(), "own", false);
 		}
 		if (DevLogger.INSTANCE.isEnabled()) {
 			DevLogger.INSTANCE.onSound(id, packet.getSource().getName(), position, packet.getVolume(), packet.getPitch());
@@ -100,6 +106,8 @@ public abstract class ClientPlayNetworkHandlerMixin {
 		if (client.player != null && packet.getId() == client.player.getId()) {
 			ShotTracker.INSTANCE.onSound(id, 0.0);
 			LatencyTester.INSTANCE.onSound(id, 0.0);
+			com.example.gtmaddons.probe.ProbeWatch.onSound(id, 0.0);
+			if (com.example.gtmaddons.probe.Probes.wants("sound")) com.example.gtmaddons.probe.Probes.emit("sound", "id", id, "dist", 0.0, "volume", (double) packet.getVolume(), "pitch", (double) packet.getPitch(), "own", true);
 		}
 		if (DevLogger.INSTANCE.isEnabled()) {
 			DevLogger.INSTANCE.onEntitySound(id, packet.getSource().getName(),
@@ -111,17 +119,34 @@ public abstract class ClientPlayNetworkHandlerMixin {
 	private void gtmaddons$onParticle(ClientboundLevelParticlesPacket packet, CallbackInfo ci) {
 		if (!gtmaddons$onGameThread()) return;
 		boolean hide = JetpackParticles.shouldHide(packet);
+		if (com.example.gtmaddons.probe.Probes.wants("particle")) com.example.gtmaddons.probe.Probes.emit("particle", "id", String.valueOf(BuiltInRegistries.PARTICLE_TYPE.getKey(packet.getParticle().getType())), "count", packet.getCount());
 		if (DevLogger.INSTANCE.isEnabled()) {
 			String id = String.valueOf(BuiltInRegistries.PARTICLE_TYPE.getKey(packet.getParticle().getType()));
 			DevLogger.INSTANCE.onParticle(hide ? id + " (hidden)" : id, packet.getCount());
+			DevLogger.INSTANCE.onParticlePacket(packet);
 		}
-		if (hide) ci.cancel();
+		if (hide || !JetpackParticles.beginPacket(packet)) {
+			JetpackParticles.endPacket();
+			ci.cancel();
+		}
+	}
+
+	@Inject(method = "handleParticleEvent", at = @At("RETURN"))
+	private void gtmaddons$afterParticle(ClientboundLevelParticlesPacket packet, CallbackInfo ci) {
+		JetpackParticles.endPacket();
+	}
+
+	@Inject(method = "handleSetEntityMotion", at = @At("HEAD"), require = 0)
+	private void gtmaddons$onMotion(net.minecraft.network.protocol.game.ClientboundSetEntityMotionPacket packet, CallbackInfo ci) {
+		if (!gtmaddons$onGameThread()) return;
+		com.example.gtmaddons.probe.ProbeWatch.onMotion(com.example.gtmaddons.compat.Mc.motionEntity(packet), com.example.gtmaddons.compat.Mc.motion(packet));
 	}
 
 	@Inject(method = "handleItemCooldown", at = @At("HEAD"))
 	private void gtmaddons$onCooldownUpdate(ClientboundCooldownPacket packet, CallbackInfo ci) {
 		if (!gtmaddons$onGameThread()) return;
 		ComboTracker.INSTANCE.onCooldown(packet.cooldownGroup(), packet.duration());
+		com.example.gtmaddons.probe.Probes.emit("cooldown", "group", packet.cooldownGroup().toString(), "ticks", packet.duration());
 		if (DevLogger.INSTANCE.isEnabled()) DevLogger.INSTANCE.onCooldown(packet.cooldownGroup().toString(), packet.duration());
 	}
 
@@ -131,6 +156,7 @@ public abstract class ClientPlayNetworkHandlerMixin {
 		// "WASTED" is GTM's death screen: ends the fight and the combat tag.
 		FightTracker.INSTANCE.onTitle(packet.text());
 		CombatTracker.INSTANCE.onTitle(packet.text());
+		if (com.example.gtmaddons.probe.Probes.wants("title")) com.example.gtmaddons.probe.Probes.onText("title", packet.text().getString());
 		if (DevLogger.INSTANCE.isEnabled()) DevLogger.INSTANCE.onTitle("TITLE", packet.text());
 	}
 
@@ -140,6 +166,7 @@ public abstract class ClientPlayNetworkHandlerMixin {
 		ShotTracker.INSTANCE.onSubtitle(packet.text());
 		HitSounds.INSTANCE.onSubtitle(packet.text());
 		FightTracker.INSTANCE.onSubtitle(packet.text());
+		if (com.example.gtmaddons.probe.Probes.wants("subtitle")) com.example.gtmaddons.probe.Probes.onText("subtitle", packet.text().getString());
 		if (DevLogger.INSTANCE.isEnabled()) DevLogger.INSTANCE.onTitle("SUBTITLE", packet.text());
 	}
 }
